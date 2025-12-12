@@ -1,0 +1,143 @@
+{
+  "task": "evt_pot_var_cvar_evaluation_optimized",
+
+  "design_principle": {
+    "evt_scope": "asset_level",
+    "portfolio_projection": true,
+    "rationale": "EVT parameters are estimated on asset return distributions and reused across portfolio weight realizations to ensure computational tractability while preserving tail-risk fidelity."
+  },
+
+  "inputs": {
+    "panel_price_path": "data/preprocessed/panel_price.parquet",
+    "portfolio_weights_path": "portfolios/portfolios.parquet"
+  },
+
+  "evt_settings": {
+    "method": "peaks_over_threshold",
+    "return_type": "log",
+
+    "threshold_selection": {
+      "method": "quantile",
+      "quantiles": [0.95],
+      "automatic_threshold": false,
+      "selection_scope": "per_asset_per_window",
+      "min_exceedances": 50
+    },
+
+    "distribution": "generalized_pareto",
+
+    "confidence_levels": [0.99],
+
+    "horizons": {
+      "base_horizon": 1,
+      "scaled_horizons": [10],
+      "scaling_rule": "sqrt_time"
+    },
+
+    "estimation_windows": [500],
+
+    "gpd_fitting_method": "pwm",
+
+    "shape_constraints": {
+      "xi_lower_bound": -0.5,
+      "xi_upper_bound": 0.5
+    },
+
+    "random_seed": 42
+  },
+
+  "computation_strategy": {
+    "fit_evt_once_per": ["asset", "estimation_window", "threshold_quantile"],
+    "reuse_evt_parameters": true,
+    "enable_parameter_cache": true,
+    "parallelization_axis": ["asset", "estimation_window"],
+    "disable_per_portfolio_evt_refit": true
+  },
+
+  "modules": {
+    "compute_daily_returns": true,
+    "compute_asset_level_evt": true,
+
+    "extract_exceedances": true,
+    "fit_gpd": true,
+    "estimate_gpd_parameters": true,
+
+    "var_from_evt": true,
+    "cvar_from_evt": true,
+
+    "portfolio_tail_projection": {
+      "enabled": true,
+      "aggregation_method": "weighted_tail_expectation",
+      "assume_tail_dependence": false
+    },
+
+    "backtesting": {
+      "enabled": true,
+      "tests": [
+        "hit_rate",
+        "violation_ratio",
+        "kupiec_unconditional_coverage",
+        "christoffersen_independence"
+      ]
+    },
+
+    "tail_metrics": [
+      "mean_exceedance",
+      "max_exceedance",
+      "expected_shortfall_exceedance",
+      "tail_index_xi",
+      "scale_beta"
+    ],
+
+    "diagnostics": {
+      "enabled": false,
+      "note": "Diagnostics are executed only during paper-level validation on selected portfolios."
+    },
+
+    "runtime_metrics": true
+  },
+
+  "performance_metrics": {
+    "accuracy": [
+      "hit_rate",
+      "violation_ratio",
+      "kupiec_unconditional_coverage",
+      "christoffersen_independence",
+      "traffic_light_zone"
+    ],
+
+    "tail_behavior": [
+      "expected_shortfall_exceedance",
+      "cvar_mean_exceedance",
+      "tail_index_xi",
+      "shape_scale_stability"
+    ],
+
+    "portfolio_structure": [
+      "num_active_assets",
+      "hhi_concentration",
+      "effective_number_of_assets"
+    ],
+
+    "runtime": [
+      "runtime_per_portfolio_ms",
+      "p95_runtime_ms",
+      "evt_fitting_time_ms",
+      "cache_hit_ratio"
+    ]
+  },
+
+  "outputs": {
+    "evt_parameter_store": "cache/evt_gpd_parameters.parquet",
+
+    "metrics_table": "results/classical_risk/evt_pot_var_cvar_metrics.parquet",
+    "metrics_json": "results/classical_risk/evt_pot_var_cvar_metrics.json",
+
+    "summary_report": "results/classical_risk/evt_pot_var_cvar_report.md"
+  },
+
+  "paper_usage_notes": {
+    "simulation_phase": "Use this configuration for large-scale portfolio experiments (>=100K portfolios).",
+    "paper_phase": "Enable diagnostics, multiple thresholds, and additional confidence levels only for representative portfolios and stress periods."
+  }
+}
