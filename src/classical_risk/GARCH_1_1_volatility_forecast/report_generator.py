@@ -29,17 +29,13 @@ def generate_report(
         Report content as string
     """
     if report_sections is None:
+        # Default sections from llm.json specification
         report_sections = [
-            "methodology_overview",
-            "garch_model_description",
-            "volatility_forecast_method",
-            "var_cvar_derivation_from_garch",
-            "backtesting_results",
-            "tail_risk_analysis",
-            "portfolio_structure_effects",
-            "robustness_and_normality_checks",
-            "computational_performance",
-            "key_insights"
+            "model_configuration",
+            "batch_execution_summary",
+            "aggregate_backtesting_results",
+            "tail_behavior_summary",
+            "runtime_statistics"
         ]
     
     report_lines = []
@@ -50,24 +46,58 @@ def generate_report(
     report_lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report_lines.append("")
     
-    # Methodology Overview
-    if "methodology_overview" in report_sections:
-        report_lines.append("## Methodology Overview")
+    # Model Configuration
+    if "model_configuration" in report_sections:
+        report_lines.append("## Model Configuration")
         report_lines.append("")
-        report_lines.append("### GARCH(1,1) Volatility Forecasting for VaR and CVaR")
+        report_lines.append("### GARCH(1,1) Model Specification")
         report_lines.append("")
-        report_lines.append("GARCH (Generalized Autoregressive Conditional Heteroskedasticity) models capture")
-        report_lines.append("time-varying volatility, which is essential for accurate risk assessment.")
-        report_lines.append("VaR and CVaR are derived from GARCH volatility forecasts using distributional assumptions.")
+        report_lines.append("The GARCH(1,1) model specifies the conditional variance as:")
         report_lines.append("")
-        report_lines.append("**Advantages:**")
-        report_lines.append("- Captures volatility clustering (high volatility followed by high volatility)")
-        report_lines.append("- Adapts to changing market conditions")
-        report_lines.append("- Provides dynamic risk estimates")
-        report_lines.append("- Well-established in financial risk management")
+        report_lines.append("σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁")
+        report_lines.append("")
+        report_lines.append("Where:")
+        report_lines.append("- σ²ₜ is the conditional variance at time t")
+        report_lines.append("- ω is the constant term")
+        report_lines.append("- α captures the ARCH effect (lagged squared residuals)")
+        report_lines.append("- β captures the GARCH effect (lagged conditional variance)")
+        report_lines.append("- εₜ are the residuals")
+        report_lines.append("")
+        
+        if garch_settings:
+            report_lines.append("### Model Parameters")
+            report_lines.append("")
+            report_lines.append(f"- **GARCH Order (p):** {garch_settings.get('p', 1)}")
+            report_lines.append(f"- **ARCH Order (q):** {garch_settings.get('q', 1)}")
+            report_lines.append(f"- **Distribution:** {garch_settings.get('distribution', 'normal')}")
+            mean_model_config = garch_settings.get('mean_model', {})
+            use_mean_model = mean_model_config.get('enabled', False)
+            report_lines.append(f"- **Mean Model:** {'Zero' if not use_mean_model else 'AR/Constant'}")
+            report_lines.append(f"- **Return Type:** {garch_settings.get('return_type', 'log')}")
+            report_lines.append(f"- **Estimation Windows:** {garch_settings.get('estimation_windows', [])} days")
+            report_lines.append(f"- **Confidence Levels:** {garch_settings.get('confidence_levels', [])}")
+            horizons_config = garch_settings.get('horizons', {})
+            if isinstance(horizons_config, dict):
+                base_horizon = horizons_config.get('base_horizon', 1)
+                scaled_horizons = horizons_config.get('scaled_horizons', [])
+                scaling_rule = horizons_config.get('scaling_rule', 'sqrt_time')
+                report_lines.append(f"- **Base Horizon:** {base_horizon} days")
+                report_lines.append(f"- **Scaled Horizons:** {scaled_horizons}")
+                report_lines.append(f"- **Scaling Rule:** {scaling_rule}")
+            else:
+                report_lines.append(f"- **Horizons:** {horizons_config if isinstance(horizons_config, list) else [1, 10]} days")
+            report_lines.append(f"- **Forecast Method:** {garch_settings.get('forecast_method', 'rolling')}")
+            report_lines.append(f"- **Fallback to Long-Run Variance:** {garch_settings.get('fallback_long_run_variance', True)}")
+            report_lines.append("")
+        
+        report_lines.append("### Design Principle")
+        report_lines.append("")
+        report_lines.append("Asset-level GARCH parameters and conditional volatility paths are estimated")
+        report_lines.append("once and reused across all portfolio batches to ensure statistical consistency,")
+        report_lines.append("computational efficiency, and reproducibility across batched execution.")
         report_lines.append("")
     
-    # GARCH Model Description
+    # Legacy sections for backward compatibility
     if "garch_model_description" in report_sections:
         report_lines.append("## GARCH Model Description")
         report_lines.append("")
@@ -142,14 +172,19 @@ def generate_report(
             report_lines.append(f"- **Confidence Levels:** {garch_settings.get('confidence_levels', [])}")
             report_lines.append("")
     
-    # Summary Statistics
-    report_lines.append("## Summary Statistics")
-    report_lines.append("")
-    report_lines.append(f"- **Total Portfolio-Configuration Combinations:** {len(metrics_df)}")
-    report_lines.append("")
     
-    # Backtesting Results
-    if "backtesting_results" in report_sections:
+    # Batch Execution Summary
+    if "batch_execution_summary" in report_sections:
+        report_lines.append("## Batch Execution Summary")
+        report_lines.append("")
+        report_lines.append(f"- **Total Portfolio-Configuration Combinations:** {len(metrics_df)}")
+        if 'portfolio_id' in metrics_df.columns:
+            unique_portfolios = metrics_df['portfolio_id'].nunique()
+            report_lines.append(f"- **Unique Portfolios:** {unique_portfolios}")
+        report_lines.append("")
+    
+    # Aggregate Backtesting Results
+    if "aggregate_backtesting_results" in report_sections:
         report_lines.append("## Backtesting Results")
         report_lines.append("")
         
@@ -178,8 +213,8 @@ def generate_report(
             report_lines.append(f"- **Kupiec Test Passed:** {kupiec_passed}/{len(metrics_df)} configurations ({kupiec_passed/len(metrics_df)*100:.1f}%)")
             report_lines.append("")
     
-    # Tail Risk Analysis
-    if "tail_risk_analysis" in report_sections:
+    # Tail Behavior Summary
+    if "tail_behavior_summary" in report_sections:
         report_lines.append("## Tail Risk Analysis")
         report_lines.append("")
         
@@ -238,8 +273,8 @@ def generate_report(
             report_lines.append(f"- **Normality Tests Passed (Jarque-Bera):** {normality_passed}/{len(metrics_df)} configurations ({normality_passed/len(metrics_df)*100:.1f}%)")
             report_lines.append("")
     
-    # Computational Performance
-    if "computational_performance" in report_sections:
+    # Runtime Statistics
+    if "runtime_statistics" in report_sections:
         report_lines.append("## Computational Performance")
         report_lines.append("")
         

@@ -1,122 +1,260 @@
 {
-    "task": "garch_1_1_var_cvar_evaluation",
-  
-    "inputs": {
-      "panel_price_path": "data/preprocessed/panel_price.parquet",
-      "portfolio_weights_path": "portfolios/portfolios.parquet"
+  "task": "garch_1_1_var_cvar_evaluation_batched",
+
+  "objective": {
+    "primary_output": "parquet_only",
+    "json_role": "schema_and_metadata_description_only",
+    "summary_report": "markdown_summary_retained",
+    "explicit_exclusion": "do_not_store_full_results_in_json"
+  },
+
+  "design_principle": {
+    "garch_scope": "asset_level",
+    "portfolio_projection": true,
+    "batch_consistency": true,
+    "rationale": "Asset-level GARCH parameters and conditional volatility paths are estimated once and reused across all portfolio batches to ensure statistical consistency, computational efficiency, and reproducibility across batched execution."
+  },
+
+  "inputs": {
+    "panel_price_path": "data/preprocessed/panel_price.parquet",
+    "portfolio_weights_path": "portfolios/portfolios.parquet"
+  },
+
+  "garch_settings": {
+    "model_type": "GARCH",
+    "p": 1,
+    "q": 1,
+
+    "mean_model": {
+      "enabled": false
     },
-  
-    "garch_settings": {
-      "model_type": "GARCH",
-      "p": 1,
-      "q": 1,
-      "use_mean_model": false,
-      "return_type": "log",
-      "estimation_windows": [252, 500],
-      "distribution": "normal",
-      "confidence_levels": [0.95, 0.99],
-      "horizons": [1, 10],
-      "forecast_method": "rolling",
-      "fallback_long_run_variance": true,
-      "random_seed": 42
+
+    "return_type": "log",
+    "estimation_windows": [500],
+    "distribution": "normal",
+
+    "confidence_levels": [0.99],
+
+    "horizons": {
+      "base_horizon": 1,
+      "scaled_horizons": [10],
+      "scaling_rule": "sqrt_time"
     },
-  
-    "modules": {
-      "compute_daily_returns": true,
-      "compute_portfolio_returns": true,
-  
-      "fit_garch": true,
-      "compute_conditional_volatility": true,
-      "rolling_volatility_forecast": true,
-  
-      "var_from_volatility": true,
-      "cvar_from_volatility": true,
-  
-      "var_violations": true,
-      "cvar_violations": true,
-  
-      "accuracy_metrics": [
-        "hit_rate",
-        "violation_ratio",
-        "kupiec",
-        "christoffersen"
-      ],
-  
-      "tail_metrics": [
-        "mean_exceedance",
-        "max_exceedance",
-        "std_exceedance"
-      ],
-  
-      "structure_metrics": [
-        "hhi",
-        "enc",
-        "condition_number"
-      ],
-  
-      "distribution_metrics": [
-        "skew",
-        "kurtosis",
-        "jarque_bera"
-      ],
-  
-      "runtime_metrics": true
+
+    "forecast_method": "rolling",
+    "fallback_long_run_variance": true,
+    "random_seed": 42
+  },
+
+  "batch_execution": {
+    "enabled": true,
+    "batch_size": 1000,
+    "batch_axis": "portfolio",
+    "ordering": "deterministic",
+    "resume_supported": true,
+    "resume_key": "batch_id",
+
+    "parallelize_within_batch": {
+      "enabled": true,
+      "axis": "portfolio",
+      "note": "Parallelize computations within a batch across portfolios. Keep each worker stateless and read-only with respect to cached asset-level data."
     },
-  
-    "performance_metrics": {
-      "accuracy": [
+
+    "note": "Each batch processes exactly 1K portfolios using identical cached GARCH parameters and conditional volatility paths."
+  },
+
+  "parallelization": {
+    "enabled": true,
+
+    "levels": {
+      "asset_level_fitting": {
+        "enabled": true,
+        "axis": ["asset", "estimation_window"],
+        "safe": true,
+        "note": "Parallelize GARCH fitting per asset/window. This is stable and avoids repeated refits per portfolio."
+      },
+
+      "portfolio_batch_level": {
+        "enabled": true,
+        "axis": "batch",
+        "safe": true,
+        "note": "Parallelize across batches only if output writing is coordinated (e.g., per-batch parquet files + final merge)."
+      },
+
+      "within_batch_level": {
+        "enabled": true,
+        "axis": "portfolio",
+        "safe": true,
+        "note": "Parallelize portfolio-level aggregation/metrics within a batch. Avoid shared mutable state; each worker returns its chunk for a single writer to persist."
+      }
+    },
+
+    "backend": {
+      "engine": "processes",
+      "options": ["processes", "threads"],
+      "recommended": "processes",
+      "rationale": "GARCH fitting and portfolio computations are typically CPU-bound; processes avoid GIL limitations."
+    },
+
+    "workers": {
+      "mode": "auto",
+      "max_workers": null,
+      "cap_fraction_of_cpu": 0.8,
+      "note": "auto = detect CPU count and use floor(cpu_count * cap_fraction_of_cpu), unless overridden."
+    },
+
+    "chunking": {
+      "portfolio_chunk_size": 250,
+      "note": "Chunk size controls memory and scheduling overhead for within-batch parallelism."
+    },
+
+    "io_safety": {
+      "single_writer": true,
+      "write_strategy": "append_per_batch",
+      "recommended_alternative": "write_per_batch_files_then_merge",
+      "note": "To avoid file locks/corruption, only one process writes to the final parquet. If parallelizing across batches, prefer per-batch parquet shards + merge step."
+    },
+
+    "fault_tolerance": {
+      "worker_retries": 1,
+      "graceful_degradation": true,
+      "note": "If a worker fails, retry once; if still failing, fall back to serial for that unit and log."
+    },
+
+    "gpu": {
+      "enabled": true,
+      "batch_size": 1000,
+      "memory_fraction": 0.8,
+      "note": "GPU acceleration for portfolio volatility computation, VaR/CVaR calculations, and covariance matrix operations. Falls back to CPU if GPU unavailable."
+    }
+  },
+
+  "cache_strategy": {
+    "cache_root": "cache/",
+
+    "preprocessing_cache": {
+      "enabled": true,
+      "contents": [
+        "aligned_return_matrix",
+        "asset_index_mapping",
+        "portfolio_index_mapping",
+        "estimation_window_metadata",
+        "random_seed_state"
+      ],
+      "path": "cache/preprocessing_state.parquet"
+    },
+
+    "garch_parameter_cache": {
+      "enabled": true,
+      "fit_once_per": ["asset", "estimation_window"],
+      "path": "cache/garch_parameters.parquet"
+    },
+
+    "conditional_volatility_cache": {
+      "enabled": true,
+      "reuse_across_batches": true,
+      "path": "cache/garch_conditional_volatility.parquet"
+    },
+
+    "batch_progress_tracker": {
+      "enabled": true,
+      "path": "cache/batch_progress.json",
+      "fields": [
+        "total_batches",
+        "completed_batches",
+        "last_successful_batch_id",
+        "timestamp"
+      ]
+    }
+  },
+
+  "modules": {
+    "compute_daily_returns": true,
+
+    "fit_asset_level_garch": true,
+    "compute_asset_conditional_volatility": true,
+    "rolling_volatility_forecast": true,
+
+    "portfolio_volatility_projection": {
+      "enabled": true,
+      "method": "variance_aggregation",
+      "use_dynamic_covariance": false
+    },
+
+    "var_from_volatility": true,
+    "cvar_from_volatility": true,
+
+    "backtesting": {
+      "enabled": true,
+      "tests": [
         "hit_rate",
         "violation_ratio",
         "kupiec_unconditional_coverage",
-        "christoffersen_independence",
-        "christoffersen_conditional_coverage",
-        "traffic_light_zone"
-      ],
-      "tail_behavior": [
-        "mean_exceedance",
-        "max_exceedance",
-        "std_exceedance",
-        "quantile_loss_score",
-        "rmse_var_vs_losses",
-        "cvar_mean_exceedance",
-        "cvar_max_exceedance"
-      ],
-      "portfolio_structure": [
-        "num_active_assets",
-        "hhi_concentration",
-        "effective_number_of_assets",
-        "covariance_condition_number"
-      ],
-      "distribution": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "runtime": [
-        "runtime_per_portfolio_ms",
-        "p95_runtime_ms",
-        "garch_fitting_time_ms",
-        "forecast_time_ms"
+        "christoffersen_independence"
       ]
     },
-  
-    "report_sections": [
-      "methodology_overview",
-      "garch_model_description",
-      "volatility_forecast_method",
-      "var_cvar_derivation_from_garch",
-      "backtesting_results",
-      "tail_risk_analysis",
-      "portfolio_structure_effects",
-      "robustness_and_normality_checks",
-      "computational_performance",
-      "key_insights"
+
+    "tail_metrics": [
+      "mean_exceedance",
+      "max_exceedance",
+      "std_exceedance"
     ],
-  
-    "outputs": {
-      "metrics_table": "results/classical_risk/garch_var_cvar_metrics.parquet",
-      "metrics_json": "results/classical_risk/garch_var_cvar_metrics.json",
-      "summary_report": "results/classical_risk/garch_var_cvar_report.md"
+
+    "time_sliced_metrics": {
+      "enabled": true,
+      "slice_by": "year"
+    },
+
+    "runtime_metrics": true
+  },
+
+  "computation_strategy": {
+    "fit_garch_once_per": ["asset", "estimation_window"],
+    "reuse_garch_parameters": true,
+    "enable_parameter_cache": true,
+    "disable_per_portfolio_garch_refit": true,
+
+    "parallelization_axis": ["asset", "estimation_window", "portfolio"],
+    "note": "Parallelization is permitted at asset/window fitting, within-batch portfolio evaluation, and (optionally) across batches with I/O-safe shard writing."
+  },
+
+  "outputs": {
+    "metrics_parquet": {
+      "path": "results/classical_risk/garch_var_cvar_metrics.parquet",
+      "write_mode": "append_per_batch",
+      "primary_key": ["portfolio_id", "date", "confidence_level", "horizon"]
+    },
+
+    "parquet_schema_json": {
+      "path": "results/classical_risk/garch_var_cvar_schema.json",
+      "description": "Human-readable JSON describing column names, dtypes, units, and semantic meaning of the parquet output."
+    },
+
+    "summary_report": {
+      "path": "results/classical_risk/garch_var_cvar_report.md",
+      "content": [
+        "model_configuration",
+        "batch_execution_summary",
+        "aggregate_backtesting_results",
+        "tail_behavior_summary",
+        "runtime_statistics"
+      ]
+    },
+
+    "optional_parallel_shards": {
+      "enabled": true,
+      "path_pattern": "results/classical_risk/shards/garch_var_cvar_metrics_batch_{batch_id}.parquet",
+      "merge_step": {
+        "enabled": true,
+        "merged_output": "results/classical_risk/garch_var_cvar_metrics.parquet",
+        "strategy": "concat_then_sort_by_primary_key"
+      },
+      "note": "Use shards if parallelizing across batches. Single writer merges shards at the end."
     }
+  },
+
+  "paper_usage_notes": {
+    "simulation_phase": "Use batched execution with cached parameters for full 100K+ portfolio simulations. Enable within-batch parallelism first; use batch-level parallelism only with shard outputs.",
+    "paper_phase": "Enable diagnostics, alternative distributions, and multi-confidence-level analysis only on selected portfolios."
   }
-  
+}

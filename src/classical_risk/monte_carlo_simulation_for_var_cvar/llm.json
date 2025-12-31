@@ -1,80 +1,422 @@
 {
-    "task": "monte_carlo_var_cvar_evaluation",
-    "inputs": {
-      "panel_price_path": "data/preprocessed/panel_price.parquet",
-      "portfolio_weights_path": "portfolios/portfolios.parquet"
+  "task": "monte_carlo_var_cvar_evaluation_batched_fast_safe_v3",
+
+  "objective": {
+    "primary_output": "parquet_only",
+    "json_role": "schema_and_metadata_description_only",
+    "summary_report": "markdown_summary_retained",
+    "explicit_exclusion": "do_not_store_full_results_in_json",
+    "non_negotiables": [
+      "retain_all_performance_metrics",
+      "retain_backtesting_suite",
+      "retain_time_sliced_metrics",
+      "retain_distribution_metrics",
+      "retain_tail_metrics"
+    ]
+  },
+
+  "design_principle": {
+    "simulation_scope": "asset_level",
+    "portfolio_projection": true,
+    "batch_consistency": true,
+    "loop_order_invariant": "time -> batch -> simulations (never portfolio -> time)",
+    "explicit_non_design": [
+      "no_per_portfolio_distribution_estimation",
+      "no_per_portfolio_simulation",
+      "no_per_portfolio_rolling_loops_over_time",
+      "no_compute_rolling_var_in_batched_path",
+      "no_compute_rolling_cvar_in_batched_path",
+      "no_process_single_portfolio_in_batched_path"
+    ],
+    "rationale": "Rolling Monte Carlo risk must be computed time-first: at each rolling window end index, scenarios are generated/loaded once and reused to compute VaR/CVaR for the entire portfolio batch via a single BLAS matmul, then ALL metrics are updated via streaming accumulators. This eliminates per-portfolio rolling loops while preserving all metrics."
+  },
+
+  "inputs": {
+    "panel_price_path": "data/preprocessed/panel_price.parquet",
+    "portfolio_weights_path": "portfolios/portfolios.parquet"
+  },
+
+  "monte_carlo_settings": {
+    "estimation_windows": [252],
+
+    "distribution_type": "multivariate_normal",
+
+    "mean_model": {
+      "enabled": true,
+      "estimator": "sample_mean"
     },
-    "monte_carlo_settings": {
-      "confidence_levels": [0.95, 0.99],
-      "horizons": [1, 10],
-      "estimation_windows": [252],
-      "num_simulations": 10000,
-      "random_seed": 42,
-      "distribution_type": "multivariate_normal"
+
+    "covariance_model": {
+      "estimator": "sample_covariance",
+      "shrinkage": {
+        "enabled": true,
+        "method": "ledoit_wolf"
+      }
     },
-    "modules": {
-      "compute_daily_returns": true,
-      "compute_portfolio_returns": true,
-      "align_returns_and_var": true,
-      "rolling_var": true,
-      "rolling_cvar": true,
-      "var_violations": true,
-      "cvar_violations": true,
-      "accuracy_metrics": ["hit_rate", "violation_ratio", "kupiec", "christoffersen"],
-      "tail_metrics": ["mean_exceedance", "max_exceedance"],
-      "structure_metrics": ["hhi", "enc", "condition_number"],
-      "distribution_metrics": ["skew", "kurtosis", "jarque_bera"],
-      "runtime_metrics": true
+
+    "num_simulations": 10000,
+
+    "confidence_levels": [0.95, 0.99],
+
+    "horizons": {
+      "base_horizon": 1,
+      "scaled_horizons": [10],
+      "scaling_rule": "sqrt_time"
     },
-    "performance_metrics": {
-      "accuracy": [
+
+    "random_seed": 42,
+
+    "numerics": {
+      "scenario_dtype": "float32",
+      "weights_dtype": "float32",
+      "projection_dtype": "float32",
+      "metric_accumulators_dtype": "float64",
+      "notes": [
+        "Keep scenarios + weights + projections in float32 to cut RAM by ~2x.",
+        "Accumulate reported metrics in float64 for stability."
+      ]
+    }
+  },
+
+  "runtime_environment": {
+    "critical_goal": "avoid_swap_and_process_memory_duplication",
+    "preferred_parallelism_mode": "single_process_numpy_blas_threads_or_threads_pool",
+    "env_vars": {
+      "default_threads_mode": {
+        "OMP_NUM_THREADS": "8",
+        "MKL_NUM_THREADS": "8",
+        "OPENBLAS_NUM_THREADS": "8"
+      },
+      "if_using_process_pool_anywhere": {
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      }
+    },
+    "memory_policy": {
+      "abort_if_swap_used_mb_gt": 0,
+      "degrade_parallelism_before_batch_size": true,
+      "degrade_batch_size_before_num_simulations": true,
+      "never_drop_metrics": true
+    }
+  },
+
+  "batch_execution": {
+    "enabled": true,
+    "batch_axis": "portfolio",
+    "batch_size": 10000,
+    "ordering": "deterministic",
+    "resume_supported": true,
+    "resume_key": "batch_id",
+
+    "execution_kernel": {
+      "name": "time_first_streaming_kernel",
+      "outer_loop_axis": "time_index (rolling window end)",
+      "inner_loop_axis": "portfolio_batch",
+      "note": "The batched path must not call process_single_portfolio, compute_rolling_var, or compute_rolling_cvar."
+    },
+
+    "core_algorithm_contract": {
+      "must_be_vectorized": true,
+      "projection_formula": "R_batch = W_batch @ scenarios.T  (single BLAS matmul per time_index, horizon, confidence_level)",
+      "var_method": "np.partition (no full sort)",
+      "cvar_method": "tail mean from argpartition indices (no full sort)",
+      "no_python_inner_loops": [
+        "no loop over portfolios inside compute_rolling_var/compute_rolling_cvar",
+        "no loop over time for each portfolio",
+        "no pandas groupby inside portfolio loop",
+        "no dataframe creation inside per-portfolio code paths"
+      ]
+    }
+  },
+
+  "parallelization": {
+    "enabled": true,
+
+    "recommended_default": {
+      "engine": "threads",
+      "max_workers": 2,
+      "reason": "Flamegraph shows per-portfolio rolling computation as the hotspot. Use threads only around NumPy-heavy kernels; avoid process pools that duplicate large arrays and cause swap thrashing."
+    },
+
+    "where_parallelism_is_allowed": {
+      "estimation_window_level": {
+        "enabled": false,
+        "note": "Only 1 estimation window (252). Keep off to reduce complexity."
+      },
+      "time_index_level": {
+        "enabled": false,
+        "note": "Parallelizing over time indices increases peak memory unless scenarios are strictly on-demand and freed immediately. Keep off by default."
+      },
+      "within_batch": {
+        "enabled": true,
+        "engine": "threads",
+        "note": "Only parallelize around vectorized NumPy kernels. Do not parallelize per portfolio."
+      }
+    },
+
+    "hard_rules": {
+      "no_process_pool_for_within_batch": true,
+      "single_writer_io": true,
+      "if_process_pool_is_ever_enabled": [
+        "scenarios_must_be_shared_memory",
+        "blas_threads_must_be_1",
+        "no_pandas_objects_in_worker"
+      ]
+    }
+  },
+
+  "cache_strategy": {
+    "cache_root": "cache/monte_carlo_simulations_for_var_cvar/",
+
+    "preprocessing_cache": {
+      "enabled": true,
+      "path": "cache/monte_carlo_simulations_for_var_cvar/preprocessing_state.parquet",
+      "contents": [
+        "asset_order",
+        "date_index",
+        "date_to_year_int",
+        "returns_matrix_float32 (T x N_assets)",
+        "weights_matrix_float32 (N_portfolios x N_assets) (optional, memory-mapped if large)",
+        "portfolio_id_index",
+        "rolling_window_end_indices (list)",
+        "rolling_window_start_indices (list)",
+        "year_bucket_index_per_time (int array)"
+      ],
+      "note": "Precompute rolling window indices and year bucket mapping once; do not recompute inside loops."
+    },
+
+    "asset_scenario_cache": {
+      "enabled": true,
+      "path": "cache/monte_carlo_simulations_for_var_cvar/asset_scenarios/",
+      "format": "per_time_index_per_horizon_npy_or_parquet",
+      "key": "time_index + estimation_window + horizon + seed + dist + shrinkage",
+      "read_mode": "memory_map",
+      "lifecycle": {
+        "load_on_demand": true,
+        "free_after_use": true,
+        "never_store_all_time_indices_in_ram": true
+      },
+      "note": "DO NOT build a giant python dict of scenarios for all rolling windows. Generate/load one time index at a time."
+    },
+
+    "batch_progress_tracker": {
+      "enabled": true,
+      "path": "cache/monte_carlo_simulations_for_var_cvar/batch_progress.json",
+      "fields": [
+        "total_batches",
+        "completed_batches",
+        "last_successful_batch_id",
+        "timestamp",
+        "last_batch_runtime_seconds",
+        "peak_rss_mb",
+        "swap_used_mb",
+        "degradation_level",
+        "last_time_index_processed"
+      ]
+    }
+  },
+
+  "modules": {
+    "compute_daily_returns": true,
+
+    "estimate_asset_return_distribution": true,
+
+    "simulate_asset_return_scenarios": {
+      "enabled": true,
+      "output_shape": "[num_simulations, num_assets]",
+      "execution_mode": "on_demand_per_time_index_per_horizon",
+      "cache_required": true,
+      "requirements": [
+        "no_global_dict_of_scenarios",
+        "scenario_arrays_are_float32",
+        "scenario_arrays_are_released_after_each_time_index"
+      ]
+    },
+
+    "portfolio_return_projection": {
+      "enabled": true,
+      "method": "linear_projection",
+      "batch_mode_required": true,
+      "requirements": [
+        "single_matmul_per_time_index",
+        "no_per_portfolio_projection_loop"
+      ]
+    },
+
+    "var_from_simulation": {
+      "enabled": true,
+      "implementation_requirement": "vectorized_batch_partition",
+      "requirements": [
+        "no_full_sort",
+        "no_per_portfolio_loop",
+        "avoid_large_boolean_masks_if_possible"
+      ]
+    },
+
+    "cvar_from_simulation": {
+      "enabled": true,
+      "implementation_requirement": "vectorized_tail_mean_from_partition_indices",
+      "requirements": [
+        "no_full_sort",
+        "no_per_portfolio_loop"
+      ]
+    },
+
+    "backtesting": {
+      "enabled": true,
+      "evaluation_mode": "rolling_out_of_sample",
+      "tests": [
         "hit_rate",
         "violation_ratio",
         "kupiec_unconditional_coverage",
         "christoffersen_independence",
-        "christoffersen_conditional_coverage",
-        "traffic_light_zone"
+        "christoffersen_conditional_coverage"
       ],
-      "tail_behavior": [
-        "mean_exceedance",
-        "max_exceedance",
-        "std_exceedance",
-        "quantile_loss_score",
-        "rmse_var_vs_losses",
-        "cvar_mean_exceedance",
-        "cvar_max_exceedance"
-      ],
-      "portfolio_structure": [
+      "implementation_requirement": "streaming_accumulators_over_time",
+      "traffic_light": {
+        "enabled": true,
+        "method": "basel",
+        "window_size_days": 250,
+        "alpha": 0.99,
+        "implementation_requirement": "streaming_window_counter (no per-portfolio loops)"
+      }
+    },
+
+    "tail_metrics": [
+      "mean_exceedance",
+      "max_exceedance",
+      "std_exceedance",
+      "quantile_loss_score",
+      "rmse_var_vs_losses",
+      "cvar_mean_exceedance",
+      "cvar_max_exceedance"
+    ],
+
+    "portfolio_structure_metrics": {
+      "enabled": true,
+      "metrics": [
         "num_active_assets",
         "hhi_concentration",
         "effective_number_of_assets",
         "covariance_condition_number"
       ],
-      "distribution": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "runtime": [
-        "runtime_per_portfolio_ms",
-        "p95_runtime_ms",
-        "simulation_time_ms"
+      "active_weight_threshold": 1e-06,
+      "implementation_requirement": "compute_once_per_portfolio_per_batch",
+      "hard_rule": "do_not_compute_returns_aligned.cov() per portfolio"
+    },
+
+    "distribution_metrics": {
+      "enabled": true,
+      "metrics": ["skewness", "kurtosis", "jarque_bera_p_value", "jarque_bera_statistic"],
+      "implementation_requirement": "compute_from_realized_portfolio_return_series (vectorized) + streaming accumulators",
+      "hard_rule": "no pandas groupby in inner loop"
+    },
+
+    "time_sliced_metrics": {
+      "enabled": true,
+      "slice_by": "year",
+      "implementation_requirement": "use year_bucket_index_per_time + streaming year buckets",
+      "hard_rule": "no pandas groupby in inner loop"
+    },
+
+    "runtime_metrics": true
+  },
+
+  "outputs": {
+    "metrics_parquet": {
+      "path": "results/classical_risk/monte_carlo_var_cvar_metrics.parquet",
+      "write_mode": "shards_then_merge",
+      "primary_key": ["portfolio_id", "date", "confidence_level", "horizon", "estimation_window"]
+    },
+
+    "parquet_schema_json": {
+      "path": "results/classical_risk/monte_carlo_var_cvar_schema.json",
+      "description": "JSON describing column names, dtypes, units, and semantics of the parquet output (NOT the full results)."
+    },
+
+    "summary_report": {
+      "path": "results/classical_risk/monte_carlo_var_cvar_report.md",
+      "content": [
+        "model_configuration",
+        "simulation_design",
+        "kernel_loop_order_validation",
+        "batch_execution_summary",
+        "aggregate_backtesting_results",
+        "tail_behavior_summary",
+        "distribution_diagnostics_summary",
+        "runtime_statistics",
+        "memory_statistics"
       ]
     },
-    "report_sections": [
-      "methodology_overview",
-      "monte_carlo_simulation_details",
-      "backtesting_results",
-      "var_cvar_comparison",
-      "tail_risk_analysis",
-      "portfolio_structure_effects",
-      "robustness_and_normality_checks",
-      "computational_performance",
-      "key_insights"
-    ],
-    "outputs": {
-      "metrics_table": "results/classical_risk/monte_carlo_var_cvar_metrics.parquet",
-      "metrics_json": "results/classical_risk/monte_carlo_var_cvar_metrics.json",
-      "summary_report": "results/classical_risk/monte_carlo_var_cvar_report.md"
+
+    "shards": {
+      "enabled": true,
+      "path_pattern": "results/classical_risk/shards/monte_carlo_var_cvar_metrics_batch_{batch_id}.parquet",
+      "merge_step": {
+        "enabled": true,
+        "merged_output": "results/classical_risk/monte_carlo_var_cvar_metrics.parquet",
+        "strategy": "concat_then_sort_by_primary_key",
+        "deduplicate_on_primary_key": true
+      }
     }
+  },
+
+  "expected_performance_targets": {
+    "assumptions": [
+      "10 assets",
+      "num_simulations=10k",
+      "batch_size=1000",
+      "1 estimation window",
+      "2 horizons (1,10)",
+      "2 confidence levels"
+    ],
+    "target_batch_runtime_seconds": {
+      "compute_only": "20_to_90",
+      "including_io": "30_to_120"
+    },
+    "target_peak_rss_gb": "<= 6",
+    "swap_usage_mb": 0,
+    "note": "If the first batch still takes 10+ minutes, it is almost certainly still calling per-portfolio rolling VaR/CVaR or caching scenarios for all time indices in RAM."
+  },
+
+  "known_bottlenecks_in_current_codebase": {
+    "confirmed_by_flamegraph": [
+      "process_single_batch -> process_single_portfolio dominates",
+      "compute_rolling_var dominates",
+      "compute_rolling_cvar dominates"
+    ],
+    "root_causes": [
+      "Per-portfolio rolling loops: per portfolio, rolling over all dates for VaR and CVaR (O(P*T)).",
+      "Scenario handling that materializes too much at once (e.g., dict of scenarios across many time indices).",
+      "Potential expensive pandas operations inside loops (year slicing, dataframes).",
+      "Parallel processes duplicating temporaries and causing swap thrash."
+    ]
+  },
+
+  "required_refactors_to_meet_targets": {
+    "must_change": [
+      "Remove/disable process_single_portfolio from the batched execution path.",
+      "Remove/disable compute_rolling_var and compute_rolling_cvar from the batched execution path; replace with vectorized batch partition + tail mean computed at each time index.",
+      "Implement time-first streaming kernel: for each rolling time index and each horizon/confidence level, compute VaR/CVaR vectors for the whole batch using a single matmul, then update all metrics via streaming accumulators.",
+      "Ensure scenario generation/loading is on-demand per time index (never build a dict of scenarios for all rolling windows in RAM).",
+      "Ensure no pandas groupby in inner loop; use cached year bucket indices and numpy aggregations.",
+      "Ensure within-batch parallelism does not parallelize per portfolio; threads allowed only around numpy kernels."
+    ],
+    "never_change": [
+      "do_not_drop_any_metrics",
+      "do_not_reduce_num_simulations_as_primary_fix"
+    ],
+    "implementation_validation_checks": [
+      "Add a runtime assertion/log that batched path never calls compute_rolling_var/compute_rolling_cvar/process_single_portfolio.",
+      "Log loop order once at start: 'loop_order=time->batch->simulations'.",
+      "Track swap_used_mb each batch; if >0, auto-reduce max_workers and/or batch_size.",
+      "Track peak RSS; if >6GB, check for scenario dict or per-portfolio arrays."
+    ]
+  },
+
+  "paper_usage_notes": {
+    "simulation_phase": "Use this config for 100K+ portfolio evaluation. Speed comes from time-first batch matmul + streaming metrics, not from skipping metrics.",
+    "paper_phase": "Keep same pipeline; optionally run heavier diagnostics (alt distributions) on selected portfolios/time periods."
   }
+}

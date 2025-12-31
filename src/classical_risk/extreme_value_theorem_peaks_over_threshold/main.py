@@ -144,7 +144,9 @@ def _restructure_results_by_portfolio(
         # Add time-sliced metrics if available
         if portfolio_id in aligned_data_dict:
             aligned_data = aligned_data_dict[portfolio_id]
-            key = f"{result['confidence_level']}_{result['horizon']}_{result['estimation_window']}"
+            # Key must match the one used in _process_single_portfolio
+            threshold_quantile = result.get('threshold_quantile', 0.95)
+            key = f"{result['confidence_level']}_{result['horizon']}_{result['estimation_window']}_{threshold_quantile}"
             if key in aligned_data:
                 time_slices = compute_time_sliced_metrics(
                     aligned_data[key]['returns'],

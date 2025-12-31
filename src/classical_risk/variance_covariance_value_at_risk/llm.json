@@ -1,70 +1,171 @@
 {
-    "task": "classical_var_evaluation",
-    "inputs": {
-      "panel_price_path": "data/preprocessed/panel_price.parquet",
-      "portfolio_weights_path": "portfolios/portfolios.parquet"
+  "task": "classical_var_evaluation_optimized",
+
+  "design_principle": {
+    "estimation_scope": "asset_level",
+    "portfolio_projection": true,
+    "rationale": "Historical return distributions are constructed once at the asset level and reused across portfolio weight realizations via linear projection, ensuring scalability and statistical consistency."
+  },
+
+  "inputs": {
+    "panel_price_path": "data/processed/panel_price.parquet",
+    "portfolio_weights_path": "portfolios/portfolios.parquet"
+  },
+
+  "var_settings": {
+    "method": "historical",
+
+    "confidence_levels": [0.95, 0.99],
+
+    "horizons": {
+      "base_horizon": 1,
+      "scaled_horizons": [10],
+      "scaling_rule": "sqrt_time"
     },
-    "var_settings": {
-      "confidence_levels": [0.95, 0.99],
-      "horizons": [1, 10],
-      "estimation_windows": [252]
+
+    "estimation_windows": [252],
+
+    "tail_side": "left",
+
+    "return_type": "log"
+  },
+
+  "computation_strategy": {
+    "compute_asset_returns_once": true,
+    "reuse_asset_return_matrix": true,
+
+    "disable_per_portfolio_return_recomputation": true,
+
+    "projection_method": "linear",
+
+    "parallelization_axis": ["estimation_window"],
+    "parallel_backend": "process",
+
+    "batching": {
+      "portfolios_batch_size": 500,
+      "note": "Batch size for memory management. Smaller values = more frequent memory cleanup but more overhead."
+    }
+  },
+
+  "modules": {
+    "compute_daily_returns": true,
+
+    "construct_asset_return_matrix": {
+      "enabled": true,
+      "output_shape": "[num_days, num_assets]"
     },
-    "modules": {
-      "compute_daily_returns": true,
-      "compute_portfolio_returns": true,
-      "align_returns_and_var": true,
-      "rolling_var": true,
-      "var_violations": true,
-      "accuracy_metrics": ["hit_rate", "violation_ratio", "kupiec", "christoffersen"],
-      "tail_metrics": ["mean_exceedance", "max_exceedance"],
-      "structure_metrics": ["hhi", "enc", "condition_number"],
-      "distribution_metrics": ["skew", "kurtosis", "jarque_bera"],
-      "runtime_metrics": true
+
+    "portfolio_return_projection": {
+      "enabled": true,
+      "formula": "R_p(t) = W^T R_assets(t)"
     },
-    "performance_metrics": {
-      "accuracy": [
+
+    "historical_var": {
+      "enabled": true,
+      "quantile_method": "empirical",
+      "interpolation": "linear"
+    },
+
+    "backtesting": {
+      "enabled": true,
+      "evaluation_mode": "rolling_out_of_sample",
+      "tests": [
         "hit_rate",
         "violation_ratio",
         "kupiec_unconditional_coverage",
         "christoffersen_independence",
-        "christoffersen_conditional_coverage",
-        "traffic_light_zone"
+        "christoffersen_conditional_coverage"
       ],
-      "tail_behavior": [
-        "mean_exceedance",
-        "max_exceedance",
-        "std_exceedance",
-        "quantile_loss_score",
-        "rmse_var_vs_losses"
-      ],
-      "portfolio_structure": [
+      "traffic_light": {
+        "enabled": true,
+        "method": "basel",
+        "window_size_days": 250,
+        "alpha": 0.99
+      }
+    },
+
+    "tail_metrics": [
+      "mean_exceedance",
+      "max_exceedance",
+      "std_exceedance",
+      "quantile_loss_score",
+      "rmse_var_vs_losses"
+    ],
+
+    "portfolio_structure_metrics": {
+      "enabled": true,
+      "metrics": [
         "num_active_assets",
         "hhi_concentration",
         "effective_number_of_assets",
         "covariance_condition_number"
       ],
-      "distribution": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "runtime": [
-        "runtime_per_portfolio_ms",
-        "p95_runtime_ms"
-      ]
+      "active_weight_threshold": 1e-06
     },
-    "report_sections": [
-      "methodology_overview",
-      "backtesting_results",
-      "tail_risk_analysis",
-      "portfolio_structure_effects",
-      "robustness_and_normality_checks",
-      "computational_performance",
-      "key_insights"
+
+    "distribution_metrics": {
+      "enabled": true,
+      "metrics": ["skewness", "kurtosis", "jarque_bera_p_value"]
+    },
+
+    "time_sliced_metrics": {
+      "enabled": true,
+      "slice_by": "year",
+      "note": "Time-sliced metrics compute metrics for each time period (e.g., by year). Uses additional memory."
+    },
+
+    "runtime_metrics": true
+  },
+
+  "performance_metrics": {
+    "accuracy": [
+      "hit_rate",
+      "violation_ratio",
+      "kupiec_unconditional_coverage",
+      "christoffersen_independence",
+      "christoffersen_conditional_coverage",
+      "traffic_light_zone"
     ],
-    "outputs": {
-      "metrics_table": "results/classical_risk/var_metrics.parquet",
-      "metrics_json": "results/classical_risk/var_metrics.json",
-      "summary_report": "results/classical_risk/var_report.md"
-    }
-  }  
+
+    "tail_behavior": [
+      "mean_exceedance",
+      "max_exceedance",
+      "std_exceedance",
+      "quantile_loss_score",
+      "rmse_var_vs_losses"
+    ],
+
+    "portfolio_structure": [
+      "num_active_assets",
+      "hhi_concentration",
+      "effective_number_of_assets",
+      "covariance_condition_number"
+    ],
+
+    "distribution": [
+      "skewness",
+      "kurtosis",
+      "jarque_bera_p_value"
+    ],
+
+    "runtime": [
+      "runtime_per_portfolio_ms",
+      "p95_runtime_ms",
+      "projection_time_ms"
+    ]
+  },
+
+  "outputs": {
+    "asset_return_store": "cache/historical_asset_returns.parquet",
+
+    "metrics_table": "results/classical_risk/var_metrics.parquet",
+    "metrics_json": "results/classical_risk/var_metrics.json",
+
+    "summary_report": "results/classical_risk/var_report.md"
+  },
+
+  "paper_usage_notes": {
+    "simulation_phase": "Use asset-level historical return matrices with linear portfolio projection for large-scale portfolio evaluation (>=100K portfolios).",
+    "paper_phase": "Stress-test alternative horizons, non-linear payoffs, and filtered historical simulation (FHS) on selected portfolios."
+  }
+}

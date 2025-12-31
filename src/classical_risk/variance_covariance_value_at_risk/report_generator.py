@@ -42,7 +42,7 @@ def generate_report(
     report_lines = []
     
     # Header
-    report_lines.append("# Variance-Covariance Value-at-Risk Evaluation Report")
+    report_lines.append("# Historical Value-at-Risk Evaluation Report")
     report_lines.append("")
     report_lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report_lines.append("")
@@ -51,20 +51,24 @@ def generate_report(
     if "methodology_overview" in report_sections:
         report_lines.append("## Methodology Overview")
         report_lines.append("")
-        report_lines.append("### Variance-Covariance (Parametric) VaR")
+        report_lines.append("### Historical Simulation VaR")
         report_lines.append("")
-        report_lines.append("The Variance-Covariance method assumes that returns follow a normal distribution.")
+        report_lines.append("The Historical Simulation method uses empirical quantiles from historical return distributions.")
         report_lines.append("VaR is calculated as:")
         report_lines.append("")
         report_lines.append("```")
-        report_lines.append("VaR = -μ - z_α * σ * √(horizon)")
+        report_lines.append("VaR_h = -Q_α(R_1) * √(h)")
         report_lines.append("```")
         report_lines.append("")
         report_lines.append("Where:")
-        report_lines.append("- μ = mean return")
-        report_lines.append("- σ = standard deviation of returns")
-        report_lines.append("- z_α = z-score for confidence level α")
-        report_lines.append("- horizon = time horizon in days")
+        report_lines.append("- Q_α(R_1) = α-quantile of historical 1-day returns")
+        report_lines.append("- α = 1 - confidence_level (e.g., 0.05 for 95% VaR)")
+        report_lines.append("- h = time horizon in days")
+        report_lines.append("- √(h) = square root scaling for multi-day horizons")
+        report_lines.append("")
+        report_lines.append("The method uses empirical quantiles with linear interpolation and computes")
+        report_lines.append("asset-level returns once, then projects to portfolios via linear combination:")
+        report_lines.append("R_p(t) = W^T R_assets(t)")
         report_lines.append("")
         
         if var_settings:

@@ -14,7 +14,12 @@ from .garch_calculator import (
     compute_rolling_var_from_garch,
     compute_rolling_cvar_from_garch,
     var_from_volatility,
-    cvar_from_volatility
+    cvar_from_volatility,
+    GARCHParameterCache,
+    compute_asset_level_conditional_volatility,
+    compute_all_asset_conditional_volatilities,
+    compute_portfolio_volatility_from_assets,
+    compute_horizons
 )
 from .backtesting import (
     detect_var_violations,
@@ -41,6 +46,11 @@ __all__ = [
     'compute_rolling_cvar_from_garch',
     'var_from_volatility',
     'cvar_from_volatility',
+    'GARCHParameterCache',
+    'compute_asset_level_conditional_volatility',
+    'compute_all_asset_conditional_volatilities',
+    'compute_portfolio_volatility_from_assets',
+    'compute_horizons',
     'detect_var_violations',
     'detect_cvar_violations',
     'compute_accuracy_metrics',

@@ -9,7 +9,7 @@ Implements VaR and CVaR violation detection and accuracy metrics including:
 import pandas as pd
 import numpy as np
 from scipy import stats
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 
 def detect_var_violations(
@@ -246,14 +246,22 @@ def christoffersen_test(
 
 def traffic_light_zone(
     violations: pd.Series,
-    confidence_level: float = 0.95
+    confidence_level: float = 0.95,
+    window_size_days: int = 250,
+    alpha: float = 0.99
 ) -> str:
     """
     Basel Traffic Light approach for VaR backtesting.
     
+    Implements the Basel Committee's traffic light system for VaR backtesting.
+    The system classifies portfolios into green, yellow, or red zones based on
+    the number of violations relative to expected violations.
+    
     Args:
         violations: Boolean Series indicating violations
-        confidence_level: Confidence level used for VaR
+        confidence_level: Confidence level used for VaR (e.g., 0.95 for 95% VaR)
+        window_size_days: Window size in days for Basel method (default: 250)
+        alpha: Significance level for Basel method (default: 0.99)
         
     Returns:
         Zone name ('green', 'yellow', 'red')
@@ -262,19 +270,30 @@ def traffic_light_zone(
     x = violations.sum()
     p = 1 - confidence_level
     
-    expected_per_250 = 250 * p
+    # Expected violations in the reference window
+    expected_per_window = window_size_days * p
     
-    if expected_per_250 < 5:
+    # Basel thresholds are based on 250-day window
+    # For 99% confidence (alpha=0.99), the thresholds are:
+    # Green: 0-4 violations in 250 days
+    # Yellow: 5-9 violations in 250 days  
+    # Red: 10+ violations in 250 days
+    
+    # For other confidence levels, scale accordingly
+    # The Basel framework uses these thresholds for 99% VaR
+    if confidence_level >= 0.99:
+        # Standard Basel thresholds for 99% VaR
         green_max = 4
         yellow_max = 9
-    elif expected_per_250 < 25:
-        green_max = int(expected_per_250 * 1.6)
-        yellow_max = int(expected_per_250 * 2.4)
     else:
-        green_max = int(expected_per_250 * 1.6)
-        yellow_max = int(expected_per_250 * 2.4)
+        # Scale thresholds based on expected violations
+        # Green zone: violations <= 0.016 * expected (roughly)
+        # Yellow zone: violations <= 0.036 * expected (roughly)
+        green_max = max(1, int(expected_per_window * 0.016))
+        yellow_max = max(green_max + 1, int(expected_per_window * 0.036))
     
-    scale_factor = n / 250
+    # Scale to actual window size
+    scale_factor = n / window_size_days
     green_threshold = green_max * scale_factor
     yellow_threshold = yellow_max * scale_factor
     
@@ -315,7 +334,8 @@ def detect_cvar_violations(
 def compute_accuracy_metrics(
     returns: pd.Series,
     var_series: pd.Series,
-    confidence_level: float = 0.95
+    confidence_level: float = 0.95,
+    traffic_light_config: Optional[Dict] = None
 ) -> Dict[str, float]:
     """
     Compute all accuracy metrics for VaR backtesting.
@@ -324,6 +344,7 @@ def compute_accuracy_metrics(
         returns: Series of actual returns
         var_series: Series of VaR values
         confidence_level: Confidence level used for VaR
+        traffic_light_config: Optional dict with 'method', 'window_size_days', 'alpha' keys
         
     Returns:
         Dictionary of accuracy metrics
@@ -336,7 +357,14 @@ def compute_accuracy_metrics(
     
     kupiec_results = kupiec_test(violations, confidence_level)
     christoffersen_results = christoffersen_test(violations, confidence_level)
-    traffic_light = traffic_light_zone(violations, confidence_level)
+    
+    # Traffic light with config
+    if traffic_light_config and traffic_light_config.get('enabled', True):
+        window_size_days = traffic_light_config.get('window_size_days', 250)
+        alpha = traffic_light_config.get('alpha', 0.99)
+        traffic_light = traffic_light_zone(violations, confidence_level, window_size_days, alpha)
+    else:
+        traffic_light = traffic_light_zone(violations, confidence_level)
     
     metrics = {
         'hit_rate': hit_rate,

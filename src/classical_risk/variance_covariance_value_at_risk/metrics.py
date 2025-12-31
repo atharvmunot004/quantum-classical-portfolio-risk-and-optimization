@@ -12,7 +12,8 @@ import time
 
 def compute_tail_metrics(
     returns: pd.Series,
-    var_series: pd.Series
+    var_series: pd.Series,
+    confidence_level: float = 0.95
 ) -> Dict[str, float]:
     """
     Compute tail risk metrics including exceedances.
@@ -20,6 +21,7 @@ def compute_tail_metrics(
     Args:
         returns: Series of actual returns
         var_series: Series of VaR values
+        confidence_level: Confidence level used for VaR
         
     Returns:
         Dictionary of tail metrics
@@ -43,7 +45,7 @@ def compute_tail_metrics(
     std_exceedance = exceedances.std()
     
     # Quantile loss (pinball loss) for VaR
-    alpha = 1 - 0.95  # Assuming 95% VaR, adjust if needed
+    alpha = 1 - confidence_level
     quantile_loss = np.mean(
         np.maximum(alpha * (returns + var_series), (alpha - 1) * (returns + var_series))
     )

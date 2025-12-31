@@ -1,6 +1,33 @@
 # Monte Carlo Simulation for VaR/CVaR Evaluation Report
 
-**Generated:** 2025-12-09 20:42:01
+**Generated:** 2025-12-31 11:42:06
+
+## Model Configuration
+
+### Distribution Estimation
+
+- **Mean Model:** sample_mean (enabled: True)
+- **Covariance Model:** sample_covariance
+  - **Shrinkage:** ledoit_wolf
+
+## Kernel Loop Order Validation
+
+This implementation follows the time-first batch execution design:
+
+**Loop Order:** `time -> batch -> simulations`
+
+- **Outer loop:** time_index (rolling window end)
+- **Inner loop:** portfolio_batch
+- **Forbidden in batched path:**
+  - `process_single_portfolio`
+  - `compute_rolling_var`
+  - `compute_rolling_cvar`
+
+**Design Rationale:**
+Rolling Monte Carlo risk must be computed time-first: at each rolling window end index,
+scenarios are generated/loaded once and reused to compute VaR/CVaR for the entire
+portfolio batch via a single BLAS matmul, then ALL metrics are updated via streaming accumulators.
+This eliminates per-portfolio rolling loops while preserving all metrics.
 
 ## Methodology Overview
 
@@ -20,7 +47,7 @@ VaR and CVaR are then calculated from the distribution of simulated returns.
 3. Calculate VaR as the quantile of simulated losses
 4. Calculate CVaR as the expected loss beyond VaR
 
-## Monte Carlo Simulation Details
+## Simulation Design
 
 ### Simulation Parameters
 
@@ -28,104 +55,97 @@ VaR and CVaR are then calculated from the distribution of simulated returns.
 - **Distribution Type:** multivariate_normal
 - **Random Seed:** 42
 - **Confidence Levels:** [0.95, 0.99]
-- **Horizons:** [1, 10] days
+- **Base Horizon:** 1 days
+- **Scaled Horizons:** [10] days
+- **Scaling Rule:** sqrt_time
 - **Estimation Windows:** [252] days
 
-## Summary Statistics
+### Design Principle
 
-- **Total Portfolios Evaluated:** 400
+- Asset-level simulation with portfolio projection
+- Scenarios estimated once per estimation window and reused across portfolios
+- Batched execution for scalability
 
-## Backtesting Results
+## Batch Execution Summary
 
-- **Average Hit Rate:** 0.0135
+- **Total Portfolios Evaluated:** 100000
+- **Total Configurations:** 400000
 
-- **Average Violation Ratio:** 0.5581
+## Aggregate Backtesting Results
+
+- **Average Hit Rate:** 0.0158
+
+- **Average Violation Ratio:** 0.6553
   - Ratio > 1 indicates overestimation of risk
   - Ratio < 1 indicates underestimation of risk
 
 ### Traffic Light Zones
 
-- **Green:** 385 portfolios (96.2%)
-- **Yellow:** 15 portfolios (3.8%)
+- **Green:** 245341 portfolios (61.3%)
+- **Red:** 100000 portfolios (25.0%)
+- **Yellow:** 54659 portfolios (13.7%)
 
-- **Kupiec Test Passed:** 66/400 portfolios (16.5%)
+- **Kupiec Test Passed:** 104014/400000 portfolios (26.0%)
 
-## VaR vs CVaR Comparison
+## Tail Behavior Summary
 
-CVaR (Conditional Value at Risk) provides additional insight into tail risk beyond VaR.
+- **Average Mean Exceedance (VaR):** 0.017187
 
-- **Average CVaR Mean Exceedance:** 0.015040
-- **Average VaR Mean Exceedance:** 0.014513
-- **Difference:** 0.000528
+- **Average Max Exceedance (VaR):** 0.074679
 
-- **Average CVaR Max Exceedance:** 0.066017
-- **Average VaR Max Exceedance:** 0.069926
+- **Average CVaR Mean Exceedance:** 0.016353
 
-## Tail Risk Analysis
+- **Average CVaR Max Exceedance:** 0.067354
 
-- **Average Mean Exceedance (VaR):** 0.014513
+## Tail Behavior Summary
 
-- **Average Max Exceedance (VaR):** 0.069926
+- **Average Mean Exceedance (VaR):** 0.017187
 
-- **Average CVaR Mean Exceedance:** 0.015040
+- **Average Max Exceedance (VaR):** 0.074679
 
-- **Average CVaR Max Exceedance:** 0.066017
+- **Average CVaR Mean Exceedance:** 0.016353
 
-## Portfolio Structure Effects
+- **Average CVaR Max Exceedance:** 0.067354
 
-- **Average Number of Active Assets:** 6.04
+- **Average Number of Active Assets:** 5.98
 
-- **Average HHI Concentration:** 0.3363
+- **Average HHI Concentration:** 0.3383
   - Higher values indicate more concentrated portfolios
 
-- **Average Effective Number of Assets:** 3.70
-
-## Robustness and Normality Checks
-
-- **Average Skewness:** -0.8043
+- **Average Skewness:** -0.9077
   - Negative values indicate left-skewed (tail risk)
 
-- **Average Excess Kurtosis:** 14.3160
+- **Average Excess Kurtosis:** 15.3296
   - Positive values indicate fat tails
 
-- **Normality Tests Passed (Jarque-Bera):** 0/400 portfolios (0.0%)
+## Runtime Statistics
 
-## Computational Performance
+## Memory Statistics
 
-- **Average Simulation Time per Portfolio:** 261589.01 ms
+Memory usage statistics are tracked during batch execution.
+Check batch_progress.json in the cache directory for detailed memory metrics.
 
-- **Average Total Runtime per Portfolio:** 1046356.06 ms
+**Key Metrics:**
+- Peak RSS (Resident Set Size): Peak memory usage during execution
+- Swap Usage: Should be 0 MB (swap usage indicates memory pressure)
 
-- **95th Percentile Runtime:** 1255371.68 ms
+**Memory Optimization Features:**
+- Float32 used for simulations and projections (halves memory footprint)
+- Thread-based parallelism (avoids process memory duplication)
+- Shard-based I/O (reduces memory spikes from large DataFrames)
 
-## Key Insights
+## Summary Statistics
 
-### Findings
-
-- **Risk Underestimation:** VaR tends to underestimate risk (violation ratio < 0.8)
-
-
-- **Fat Tails Detected:** Returns exhibit fat tails, which Monte Carlo simulation can better capture than parametric methods
-
-### Recommendations
-
-- Use CVaR for portfolios with significant tail risk (when CVaR >> VaR)
-- Consider increasing number of simulations for more stable estimates
-- Monitor portfolios in 'red' traffic light zone more closely
-- Adjust confidence levels or horizons based on backtesting results
-
-## Detailed Metrics
-
-### Summary Statistics by Metric
+### Aggregate Metrics
 
 ```
-       portfolio_id  confidence_level     horizon  estimation_window  var_runtime_ms  simulation_time_ms    hit_rate  violation_ratio  kupiec_unconditional_coverage  kupiec_test_statistic  christoffersen_independence  christoffersen_independence_statistic  christoffersen_conditional_coverage  christoffersen_conditional_coverage_statistic  num_violations  total_observations  expected_violations  mean_exceedance  max_exceedance  std_exceedance  quantile_loss_score  rmse_var_vs_losses  cvar_mean_exceedance  cvar_max_exceedance  cvar_std_exceedance  portfolio_size  num_active_assets  hhi_concentration  effective_number_of_assets  covariance_condition_number    skewness    kurtosis  jarque_bera_p_value  jarque_bera_statistic  runtime_per_portfolio_ms  p95_runtime_ms  mean_runtime_ms  median_runtime_ms  min_runtime_ms  max_runtime_ms
-count     400.00000        400.000000  400.000000              400.0      400.000000          400.000000  400.000000       400.000000                     386.000000             386.000000                 3.860000e+02                             386.000000                         3.860000e+02                                     386.000000      400.000000               400.0           400.000000       386.000000      386.000000      325.000000           386.000000          386.000000            344.000000           344.000000           275.000000      400.000000         400.000000         400.000000                  400.000000                 4.000000e+02  400.000000  400.000000                400.0             400.000000              4.000000e+02    4.000000e+02     4.000000e+02       4.000000e+02      400.000000    4.000000e+02
-mean       49.50000          0.970000    5.500000              252.0   261589.014353       261589.014353    0.013540         0.558134                       0.050448              67.226011                 4.820249e-01                               4.042619                         1.942329e-02                                      71.268630       33.457500              2471.0            74.130000         0.014513        0.069926        0.017537             0.001389            0.021234              0.015040             0.066017             0.017938        6.040000           6.040000           0.336270                    3.696964                 1.188948e+01   -0.804314   14.315997                  0.0           22834.763974              1.046356e+06    1.255372e+06     1.046356e+06       1.033267e+06   412310.291529    1.257012e+06
-std        28.90222          0.020025    4.505636                0.0   204420.037459       204420.037459    0.015100         0.574002                       0.143899              87.093698                 4.402231e-01                               5.538034                         7.208215e-02                                      84.528784       37.311574                 0.0            49.481891         0.006808        0.042527        0.006411             0.000926            0.007963              0.008441             0.042914             0.006222        2.540578           2.540578           0.178411                    1.560244                 3.557163e-15    0.430952    3.680194                  0.0           11017.609703              0.000000e+00    0.000000e+00     0.000000e+00       0.000000e+00        0.000000    0.000000e+00
-min         0.00000          0.950000    1.000000              252.0    24604.095221        24604.095221    0.000000         0.000000                       0.000000               0.003425                 3.144869e-07                               0.000810                         0.000000e+00                                       1.247433        0.000000              2471.0            24.710000         0.001298        0.001542        0.001708             0.000386            0.001542              0.000493             0.000493             0.000960        2.000000           2.000000           0.142291                    1.065007                 1.188948e+01   -1.449692    4.381795                  0.0            1978.370736              1.046356e+06    1.255372e+06     1.046356e+06       1.033267e+06   412310.291529    1.257012e+06
-25%        24.75000          0.950000    1.000000              252.0    58620.214343        58620.214343    0.001113         0.040469                       0.000000               5.493693                 6.829605e-03                               0.007296                         0.000000e+00                                      13.640815        2.750000              2471.0            24.710000         0.009984        0.030968        0.013782             0.000644            0.016636              0.010727             0.023144             0.014442        4.000000           4.000000           0.209405                    2.367240                 1.188948e+01   -1.110229   11.399792                  0.0           13388.199371              1.046356e+06    1.255372e+06     1.046356e+06       1.033267e+06   412310.291529    1.257012e+06
-50%        49.50000          0.970000    5.500000              252.0   155740.576625       155740.576625    0.006070         0.331849                       0.000045              16.765404                 4.631134e-01                               0.541878                         1.885483e-07                                      30.967823       15.000000              2471.0            74.130000         0.013112        0.071403        0.017186             0.001177            0.021030              0.013799             0.074409             0.019063        6.000000           6.000000           0.279022                    3.583950                 1.188948e+01   -0.866401   14.655829                  0.0           22377.196540              1.046356e+06    1.255372e+06     1.046356e+06       1.033267e+06   412310.291529    1.257012e+06
-75%        74.25000          0.990000   10.000000              252.0   459686.223209       459686.223209    0.021044         0.878187                       0.019085             192.901426                 9.319287e-01                               7.339607                         1.092452e-03                                     192.953417       52.000000              2471.0           123.550000         0.016983        0.104178        0.020375             0.002248            0.025505              0.016817             0.100640             0.021857        8.000000           8.000000           0.422513                    4.776810                 1.188948e+01   -0.600521   16.772617                  0.0           29536.058078              1.046356e+06    1.255372e+06     1.046356e+06       1.033267e+06   412310.291529    1.257012e+06
-max        99.00000          0.990000   10.000000              252.0   575819.443941       575819.443941    0.043707         1.902064                       0.953334             232.793912                 9.772942e-01                              26.158640                         5.359488e-01                                     232.797153      108.000000              2471.0           123.550000         0.044545        0.179341        0.054322             0.004285            0.058819              0.053776             0.168640             0.034204       10.000000          10.000000           0.938961                    7.027832                 1.188948e+01    0.616589   21.416676                  0.0           48089.824486              1.046356e+06    1.255372e+06     1.046356e+06       1.033267e+06   412310.291529    1.257012e+06
+        portfolio_id  confidence_level        horizon  estimation_window       hit_rate  violation_ratio  kupiec_unconditional_coverage  kupiec_test_statistic  christoffersen_independence  christoffersen_independence_statistic  christoffersen_conditional_coverage  christoffersen_conditional_coverage_statistic  num_violations  total_observations  expected_violations  mean_exceedance  max_exceedance  std_exceedance  quantile_loss_score  rmse_var_vs_losses  cvar_mean_exceedance  cvar_max_exceedance  cvar_std_exceedance       skewness       kurtosis  jarque_bera_p_value  jarque_bera_statistic  portfolio_size  num_active_assets  hhi_concentration  effective_number_of_assets  covariance_condition_number
+count  400000.000000         400000.00  400000.000000           400000.0  400000.000000    400000.000000                  391778.000000           3.917780e+05                 3.917780e+05                          391778.000000                        391778.000000                                  391778.000000   400000.000000            400000.0        400000.000000     3.917780e+05    3.917780e+05    3.348730e+05        391778.000000        3.917780e+05          3.627130e+05         3.627130e+05         2.784210e+05  400000.000000  400000.000000             400000.0          400000.000000   400000.000000      400000.000000      400000.000000               400000.000000                 4.000000e+05
+mean    49999.500000              0.97       5.500000              252.0       0.015837         0.655331                       0.100285           5.979548e+01                 4.974970e-01                               3.463318                             0.017020                                      63.258798       35.157283              2220.0            66.600000     1.718716e-02    7.467870e-02    1.888308e-02             0.001478        2.418822e-02          1.635330e-02         6.735353e-02         1.913736e-02      -0.907716      15.329559                  0.0           23819.561083        5.977960           5.977960           0.338342                    3.682122                 3.256387e+01
+std     28867.549542              0.02       4.500006                0.0       0.017857         0.675176                       0.211747           7.866193e+01                 4.410300e-01                               4.721879                             0.061168                                      76.344321       39.641533                 0.0            44.400056     9.500370e-03    4.138569e-02    7.996431e-03             0.001033        9.831032e-03          9.779993e-03         4.346121e-02         6.428601e-03       0.425098       4.300559                  0.0           12139.851654        2.571562           2.571562           0.176871                    1.583867                 7.105436e-15
+min         0.000000              0.95       1.000000              252.0       0.000000         0.000000                       0.000000          -1.705303e-13                 2.405368e-10                               0.000021                             0.000000                                       0.032661        0.000000              2220.0            22.200000     3.129244e-07    3.129244e-07    7.533749e-07             0.000370        3.129244e-07          5.289912e-07         5.289912e-07         5.004938e-07      -1.728951       4.083071                  0.0            1542.139647        2.000000           2.000000           0.105833                    1.000105                 3.256387e+01
+25%     24999.750000              0.95       1.000000              252.0       0.000901         0.045045                       0.000000           3.244080e+00                 1.245709e-02                               0.008123                             0.000000                                      10.939200        2.000000              2220.0            22.200000     1.060700e-02    3.786369e-02    1.465734e-02             0.000689        1.813595e-02          1.130011e-02         2.586865e-02         1.636383e-02      -1.225303      12.232428                  0.0           14067.986784        4.000000           4.000000           0.207012                    2.370002                 3.256387e+01
+50%     49999.500000              0.97       5.500000              252.0       0.006081         0.391892                       0.000004           2.118610e+01                 6.483363e-01                               0.208004                             0.000002                                      26.566488       13.500000              2220.0            66.600000     1.434948e-02    7.514229e-02    1.806635e-02             0.001181        2.289714e-02          1.447596e-02         7.178381e-02         1.971723e-02      -0.970461      15.577352                  0.0           22801.312099        6.000000           6.000000           0.281837                    3.548152                 3.256387e+01
+75%     74999.250000              0.99      10.000000              252.0       0.026802         1.063063                       0.071682           1.801297e+02                 9.281869e-01                               6.244623                             0.004213                                     180.162225       59.500000              2220.0           111.000000     2.175854e-02    1.069386e-01    2.195053e-02             0.002500        2.858827e-02          1.828976e-02         1.026990e-01         2.287224e-02      -0.660677      18.631012                  0.0           32598.120373        8.000000           8.000000           0.421941                    4.830638                 3.256387e+01
+max     99999.000000              0.99      10.000000              252.0       0.057658         2.567568                       1.000000           2.162210e+02                 9.963209e-01                              40.106099                             0.983802                                     216.221932      128.000000              2220.0           111.000000     1.127578e-01    2.154096e-01    7.993707e-02             0.005690        1.127578e-01          7.670262e-02         2.030709e-01         5.361895e-02       0.698602      26.010184                  0.0           63540.096362       10.000000          10.000000           0.999895                    9.448865                 3.256387e+01
 ```

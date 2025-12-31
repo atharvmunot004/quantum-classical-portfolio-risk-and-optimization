@@ -106,7 +106,8 @@ def compute_cvar_tail_metrics(
 
 def compute_structure_metrics(
     portfolio_weights: pd.Series,
-    covariance_matrix: Optional[pd.DataFrame] = None
+    covariance_matrix: Optional[pd.DataFrame] = None,
+    active_weight_threshold: float = 1e-06
 ) -> Dict[str, float]:
     """
     Compute portfolio structure metrics.
@@ -114,12 +115,13 @@ def compute_structure_metrics(
     Args:
         portfolio_weights: Series of portfolio weights
         covariance_matrix: Optional covariance matrix for condition number
+        active_weight_threshold: Threshold for considering a weight as active
         
     Returns:
         Dictionary of structure metrics
     """
     weights_array = portfolio_weights.values
-    active_weights = weights_array[weights_array > 1e-10]  # Non-zero weights
+    active_weights = weights_array[weights_array > active_weight_threshold]  # Active weights
     
     num_active_assets = len(active_weights)
     
