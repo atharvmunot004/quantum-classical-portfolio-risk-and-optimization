@@ -309,7 +309,8 @@ def traffic_light_zone(
 def compute_accuracy_metrics(
     returns: pd.Series,
     var_series: pd.Series,
-    confidence_level: float = 0.95
+    confidence_level: float = 0.95,
+    compute_traffic_light: bool = True
 ) -> Dict[str, float]:
     """
     Compute all accuracy metrics for VaR backtesting.
@@ -318,6 +319,8 @@ def compute_accuracy_metrics(
         returns: Series of actual returns
         var_series: Series of VaR values
         confidence_level: Confidence level used for VaR
+        compute_traffic_light: Whether to compute traffic light zone (default: True)
+                              Per JSON spec, should only be True for 99% VaR
         
     Returns:
         Dictionary of accuracy metrics
@@ -330,7 +333,6 @@ def compute_accuracy_metrics(
     
     kupiec_results = kupiec_test(violations, confidence_level)
     christoffersen_results = christoffersen_test(violations, confidence_level)
-    traffic_light = traffic_light_zone(violations, confidence_level)
     
     metrics = {
         'hit_rate': hit_rate,
@@ -344,11 +346,17 @@ def compute_accuracy_metrics(
         'christoffersen_conditional_coverage': christoffersen_results['conditional_coverage_p_value'],
         'christoffersen_conditional_coverage_statistic': christoffersen_results['conditional_coverage_test_statistic'],
         'christoffersen_conditional_coverage_reject_null': christoffersen_results['conditional_coverage_reject_null'],
-        'traffic_light_zone': traffic_light,
         'num_violations': violations.sum(),
         'total_observations': len(violations),
         'expected_violations': len(violations) * expected_violation_rate
     }
+    
+    # Traffic light only computed if requested (per JSON spec: only for 99% VaR)
+    if compute_traffic_light:
+        traffic_light = traffic_light_zone(violations, confidence_level)
+        metrics['traffic_light_zone'] = traffic_light
+    else:
+        metrics['traffic_light_zone'] = None
     
     return metrics
 

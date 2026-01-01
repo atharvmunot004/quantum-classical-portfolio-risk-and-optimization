@@ -14,7 +14,9 @@ def generate_report(
     metrics_df: pd.DataFrame,
     output_path: Union[str, Path],
     var_settings: Optional[Dict] = None,
-    report_sections: Optional[List[str]] = None
+    report_sections: Optional[List[str]] = None,
+    include_tables: bool = False,
+    include_figures: bool = True
 ) -> str:
     """
     Generate comprehensive markdown report from metrics DataFrame.
@@ -218,19 +220,27 @@ def generate_report(
         report_lines.append("- Adjust confidence levels or horizons based on backtesting results")
         report_lines.append("")
     
-    # Detailed Metrics Table
-    report_lines.append("## Detailed Metrics")
-    report_lines.append("")
-    report_lines.append("### Summary Statistics by Metric")
-    report_lines.append("")
+    # Detailed Metrics Table (only if include_tables is True)
+    if include_tables:
+        report_lines.append("## Detailed Metrics")
+        report_lines.append("")
+        report_lines.append("### Summary Statistics by Metric")
+        report_lines.append("")
+        
+        numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
+        summary_stats = metrics_df[numeric_cols].describe()
+        
+        report_lines.append("```")
+        report_lines.append(summary_stats.to_string())
+        report_lines.append("```")
+        report_lines.append("")
     
-    numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
-    summary_stats = metrics_df[numeric_cols].describe()
-    
-    report_lines.append("```")
-    report_lines.append(summary_stats.to_string())
-    report_lines.append("```")
-    report_lines.append("")
+    # Figures section (placeholder - can be extended with actual figure generation)
+    if include_figures:
+        report_lines.append("## Figures")
+        report_lines.append("")
+        report_lines.append("_Figure generation can be extended here with visualization libraries._")
+        report_lines.append("")
     
     report_content = "\n".join(report_lines)
     

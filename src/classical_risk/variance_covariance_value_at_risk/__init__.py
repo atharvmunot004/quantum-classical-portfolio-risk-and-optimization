@@ -13,7 +13,11 @@ Key optimization: Asset returns are computed once at the asset level and
 reused across portfolio weight realizations via linear projection.
 """
 
-from .main import evaluate_var
+# Lazy import to avoid RuntimeWarning when running main.py as a module
+def evaluate_var(*args, **kwargs):
+    """Lazy import wrapper for evaluate_var to avoid import conflicts."""
+    from .main import evaluate_var as _evaluate_var
+    return _evaluate_var(*args, **kwargs)
 from .returns import (
     compute_daily_returns,
     compute_portfolio_returns,

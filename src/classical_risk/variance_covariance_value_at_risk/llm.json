@@ -4,7 +4,7 @@
   "design_principle": {
     "estimation_scope": "asset_level",
     "portfolio_projection": true,
-    "rationale": "Historical return distributions are constructed once at the asset level and reused across portfolio weight realizations via linear projection, ensuring scalability and statistical consistency."
+    "rationale": "Historical return distributions are constructed once at the asset level and reused across portfolio weight realizations via linear projection, ensuring scalability, statistical consistency, and bounded memory usage for large-scale portfolio simulations."
   },
 
   "inputs": {
@@ -20,30 +20,55 @@
     "horizons": {
       "base_horizon": 1,
       "scaled_horizons": [10],
-      "scaling_rule": "sqrt_time"
+      "scaling_rule": "sqrt_time",
+      "assumptions": {
+        "iid_returns": true,
+        "note": "Square-root-of-time scaling is applied as a benchmark approximation; limitations are discussed relative to EVT and GARCH-based models."
+      }
     },
 
     "estimation_windows": [252],
 
     "tail_side": "left",
+    "return_type": "log",
 
-    "return_type": "log"
+    "loss_convention": {
+      "losses_positive": true,
+      "note": "Portfolio losses are defined as negative returns multiplied by -1 for VaR evaluation."
+    }
   },
 
   "computation_strategy": {
     "compute_asset_returns_once": true,
     "reuse_asset_return_matrix": true,
-
     "disable_per_portfolio_return_recomputation": true,
 
     "projection_method": "linear",
 
-    "parallelization_axis": ["estimation_window"],
-    "parallel_backend": "process",
+    "parallelization": {
+      "axis": ["estimation_window"],
+      "backend": "process",
+      "max_workers": "cpu_count_minus_one",
+      "cpu_affinity": true,
+      "enable_window_parallel": true,
+      "enable_portfolio_parallel": true,
+      "chunk_size": 10,
+      "note": "Window-level parallelization processes multiple estimation windows in parallel. Portfolio-level parallelization processes multiple portfolios within each batch in parallel. Chunk size controls batching for parallel portfolio processing."
+    },
+
+    "memory_management": {
+      "max_memory_fraction": 0.75,
+      "enable_chunked_execution": true,
+      "enable_explicit_gc": true,
+      "spill_intermediate_to_disk": true,
+      "intermediate_store_format": "parquet",
+      "flush_frequency_batches": 1
+    },
 
     "batching": {
       "portfolios_batch_size": 500,
-      "note": "Batch size for memory management. Smaller values = more frequent memory cleanup but more overhead."
+      "adaptive_batching": true,
+      "note": "Batch size is dynamically reduced if memory pressure exceeds safe thresholds."
     }
   },
 
@@ -52,7 +77,11 @@
 
     "construct_asset_return_matrix": {
       "enabled": true,
-      "output_shape": "[num_days, num_assets]"
+      "output_shape": "[num_days, num_assets]",
+      "storage": {
+        "format": "parquet",
+        "path": "cache/historical_asset_returns.parquet"
+      }
     },
 
     "portfolio_return_projection": {
@@ -69,6 +98,7 @@
     "backtesting": {
       "enabled": true,
       "evaluation_mode": "rolling_out_of_sample",
+
       "tests": [
         "hit_rate",
         "violation_ratio",
@@ -76,11 +106,13 @@
         "christoffersen_independence",
         "christoffersen_conditional_coverage"
       ],
+
       "traffic_light": {
         "enabled": true,
         "method": "basel",
+        "alpha": 0.99,
         "window_size_days": 250,
-        "alpha": 0.99
+        "note": "Traffic-light evaluation is reported only for the 99% VaR level in line with Basel guidance."
       }
     },
 
@@ -105,13 +137,17 @@
 
     "distribution_metrics": {
       "enabled": true,
-      "metrics": ["skewness", "kurtosis", "jarque_bera_p_value"]
+      "metrics": [
+        "skewness",
+        "kurtosis",
+        "jarque_bera_p_value"
+      ]
     },
 
     "time_sliced_metrics": {
       "enabled": true,
       "slice_by": "year",
-      "note": "Time-sliced metrics compute metrics for each time period (e.g., by year). Uses additional memory."
+      "memory_note": "Computed sequentially per slice to avoid cross-period memory accumulation."
     },
 
     "runtime_metrics": true
@@ -156,16 +192,35 @@
   },
 
   "outputs": {
-    "asset_return_store": "cache/historical_asset_returns.parquet",
+    "metrics_table": {
+      "format": "parquet",
+      "path": "results/classical_risk/var_metrics.parquet",
+      "partition_by": ["confidence_level", "horizon"],
+      "compression": "zstd"
+    },
 
-    "metrics_table": "results/classical_risk/var_metrics.parquet",
-    "metrics_json": "results/classical_risk/var_metrics.json",
+    "metrics_schema": {
+      "format": "json",
+      "path": "results/classical_risk/var_metrics_schema.json",
+      "content": "column_names_dtypes_units_and_indexing"
+    },
 
-    "summary_report": "results/classical_risk/var_report.md"
+    "summary_report": {
+      "format": "markdown",
+      "path": "results/classical_risk/var_report.md",
+      "include_tables": false,
+      "include_figures": true
+    }
+  },
+
+  "reproducibility": {
+    "random_seed": 42,
+    "deterministic_projection": true,
+    "notes": "Portfolio weights are fixed ex-ante via Dirichlet sampling."
   },
 
   "paper_usage_notes": {
-    "simulation_phase": "Use asset-level historical return matrices with linear portfolio projection for large-scale portfolio evaluation (>=100K portfolios).",
-    "paper_phase": "Stress-test alternative horizons, non-linear payoffs, and filtered historical simulation (FHS) on selected portfolios."
+    "simulation_phase": "Asset-level historical return matrices with linear projection enable scalable evaluation across 100K+ portfolios.",
+    "paper_phase": "Comparisons with filtered historical simulation, EVT, and GARCH models are conducted on representative portfolio subsets."
   }
 }

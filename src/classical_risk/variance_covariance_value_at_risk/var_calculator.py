@@ -47,19 +47,30 @@ def compute_historical_var(
     
     # Compute empirical quantile
     if quantile_method == 'empirical':
-        if interpolation == 'linear':
-            var_1day = -np.percentile(returns_array, quantile_level, interpolation='linear')
-        elif interpolation == 'lower':
-            var_1day = -np.percentile(returns_array, quantile_level, interpolation='lower')
-        elif interpolation == 'higher':
-            var_1day = -np.percentile(returns_array, quantile_level, interpolation='higher')
-        elif interpolation == 'midpoint':
-            var_1day = -np.percentile(returns_array, quantile_level, interpolation='midpoint')
-        elif interpolation == 'nearest':
-            var_1day = -np.percentile(returns_array, quantile_level, interpolation='nearest')
-        else:
-            # Default to linear
-            var_1day = -np.percentile(returns_array, quantile_level, interpolation='linear')
+        # Handle different NumPy versions for percentile calculation
+        # NumPy 1.22.0+ uses np.quantile with 'method' parameter
+        # NumPy 1.9.0-1.21.x uses np.percentile with 'interpolation' parameter
+        # Older NumPy uses np.percentile without interpolation parameter
+        
+        # First try np.quantile with method (NumPy 1.22.0+)
+        try:
+            interpolation_to_method = {
+                'linear': 'linear',
+                'lower': 'lower',
+                'higher': 'higher',
+                'midpoint': 'midpoint',
+                'nearest': 'nearest'
+            }
+            method = interpolation_to_method.get(interpolation, 'linear')
+            var_1day = -np.quantile(returns_array, quantile_level / 100.0, method=method)
+        except (TypeError, ValueError, AttributeError):
+            # Fallback to np.percentile with interpolation (NumPy 1.9.0-1.21.x)
+            try:
+                var_1day = -np.percentile(returns_array, quantile_level, interpolation=interpolation)
+            except TypeError:
+                # Fallback for very old NumPy: use default percentile
+                # Default behavior approximates 'linear' interpolation
+                var_1day = -np.percentile(returns_array, quantile_level)
     else:
         raise ValueError(f"Unknown quantile_method: {quantile_method}")
     
@@ -85,10 +96,13 @@ def compute_rolling_historical_var(
     scaling_rule: str = 'sqrt_time',
     quantile_method: str = 'empirical',
     interpolation: str = 'linear',
-    min_periods: Optional[int] = None
+    min_periods: Optional[int] = None,
+    use_vectorized: bool = True
 ) -> pd.Series:
     """
     Compute rolling Historical VaR using a rolling window.
+    
+    Uses vectorized operations when possible for better performance.
     
     Args:
         portfolio_returns: Series of portfolio returns with dates as index
@@ -99,6 +113,7 @@ def compute_rolling_historical_var(
         quantile_method: Method for quantile ('empirical')
         interpolation: Interpolation method ('linear', 'lower', 'higher', 'midpoint', 'nearest')
         min_periods: Minimum number of periods required for calculation
+        use_vectorized: Whether to use vectorized rolling operations (faster)
         
     Returns:
         Series of rolling VaR values with dates as index
@@ -106,6 +121,64 @@ def compute_rolling_historical_var(
     if min_periods is None:
         min_periods = min(window, len(portfolio_returns))
     
+    # Compute quantile level (left tail)
+    alpha = 1 - confidence_level
+    quantile_level = alpha * 100  # Convert to percentile
+    
+    # Scale factor for horizon
+    if horizon == 1:
+        horizon_scale = 1.0
+    elif scaling_rule == 'sqrt_time':
+        horizon_scale = np.sqrt(horizon)
+    elif scaling_rule == 'linear':
+        horizon_scale = horizon
+    else:
+        horizon_scale = np.sqrt(horizon)
+    
+    if use_vectorized and len(portfolio_returns) > window:
+        # Use pandas rolling with custom quantile calculation for better performance
+        try:
+            # Convert interpolation to method for np.quantile
+            interpolation_to_method = {
+                'linear': 'linear',
+                'lower': 'lower',
+                'higher': 'higher',
+                'midpoint': 'midpoint',
+                'nearest': 'nearest'
+            }
+            method = interpolation_to_method.get(interpolation, 'linear')
+            
+            # Use pandas rolling quantile which is vectorized
+            def compute_var(series):
+                """Compute VaR for a window of returns."""
+                if len(series) < min_periods:
+                    return np.nan
+                try:
+                    # Try np.quantile with method (NumPy 1.22.0+)
+                    var_1day = -np.quantile(series.values, quantile_level / 100.0, method=method)
+                except (TypeError, ValueError, AttributeError):
+                    try:
+                        # Fallback to np.percentile with interpolation (NumPy 1.9.0-1.21.x)
+                        var_1day = -np.percentile(series.values, quantile_level, interpolation=interpolation)
+                    except TypeError:
+                        # Fallback for very old NumPy
+                        var_1day = -np.percentile(series.values, quantile_level)
+                
+                return float(var_1day * horizon_scale)
+            
+            # Use rolling apply with vectorized quantile
+            rolling_var = portfolio_returns.rolling(
+                window=window,
+                min_periods=min_periods
+            ).apply(compute_var, raw=False)
+            
+            return rolling_var
+            
+        except Exception:
+            # Fall back to loop-based approach if vectorized fails
+            pass
+    
+    # Loop-based approach (fallback or when use_vectorized=False)
     rolling_var = pd.Series(index=portfolio_returns.index, dtype=float)
     
     for i in range(len(portfolio_returns)):
