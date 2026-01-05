@@ -2,13 +2,13 @@
 EVT-POT calculator for VaR and CVaR estimation using Extreme Value Theory.
 
 Implements Peaks Over Threshold (POT) methodology with Generalized Pareto Distribution (GPD)
-for asset-level EVT fitting with portfolio projection.
+for asset-level EVT fitting with rolling windows.
 
 Key features:
 - Asset-level EVT parameter estimation
+- Rolling window estimation for time series VaR/CVaR
 - PWM (Probability Weighted Moments) method for GPD fitting
-- Parameter caching for computational efficiency
-- Portfolio tail projection using weighted tail expectation
+- Parameter caching for computational efficiency (per asset/window/quantile/time)
 """
 import pandas as pd
 import numpy as np
@@ -17,6 +17,7 @@ import warnings
 from pathlib import Path
 import pickle
 import hashlib
+from threading import Lock
 
 
 def extract_exceedances(
@@ -375,7 +376,8 @@ class EVTParameterCache:
     """
     Cache for EVT parameters to avoid recomputation.
     
-    Stores EVT parameters keyed by (asset, estimation_window, threshold_quantile).
+    Stores EVT parameters keyed by (asset, date, estimation_window, threshold_quantile)
+    to support per-time-index caching for rolling windows.
     """
     
     def __init__(self, cache_path: Optional[Union[str, Path]] = None):
@@ -383,9 +385,10 @@ class EVTParameterCache:
         Initialize parameter cache.
         
         Args:
-            cache_path: Optional path to save/load cache from disk
+            cache_path: Optional path to save/load cache from disk (parquet format)
         """
-        self.cache: Dict[Tuple[str, int, float], Dict[str, Any]] = {}
+        # Cache structure: (asset, date, estimation_window, threshold_quantile) -> parameters
+        self.cache: Dict[Tuple[str, pd.Timestamp, int, float], Dict[str, Any]] = {}
         self.cache_path = Path(cache_path) if cache_path else None
         self.cache_hits = 0
         self.cache_misses = 0
@@ -397,13 +400,14 @@ class EVTParameterCache:
             except Exception as e:
                 warnings.warn(f"Failed to load cache: {e}")
     
-    def _make_key(self, asset: str, estimation_window: int, threshold_quantile: float) -> Tuple[str, int, float]:
+    def _make_key(self, asset: str, date: pd.Timestamp, estimation_window: int, threshold_quantile: float) -> Tuple[str, pd.Timestamp, int, float]:
         """Create cache key."""
-        return (asset, estimation_window, threshold_quantile)
+        return (asset, date, estimation_window, threshold_quantile)
     
     def get(
         self,
         asset: str,
+        date: Optional[pd.Timestamp],
         estimation_window: int,
         threshold_quantile: float
     ) -> Optional[Dict[str, Any]]:
@@ -412,13 +416,24 @@ class EVTParameterCache:
         
         Args:
             asset: Asset name
+            date: Date for time-indexed cache (None for non-time-indexed)
             estimation_window: Estimation window size
             threshold_quantile: Threshold quantile
             
         Returns:
             Cached parameters or None if not found
         """
-        key = self._make_key(asset, estimation_window, threshold_quantile)
+        # For backward compatibility, if date is None, try to find any cached entry
+        if date is None:
+            # Search for any entry with matching asset, window, quantile
+            for key, value in self.cache.items():
+                if key[0] == asset and key[2] == estimation_window and key[3] == threshold_quantile:
+                    self.cache_hits += 1
+                    return value
+            self.cache_misses += 1
+            return None
+        
+        key = self._make_key(asset, date, estimation_window, threshold_quantile)
         if key in self.cache:
             self.cache_hits += 1
             return self.cache[key]
@@ -429,6 +444,7 @@ class EVTParameterCache:
     def set(
         self,
         asset: str,
+        date: Optional[pd.Timestamp],
         estimation_window: int,
         threshold_quantile: float,
         parameters: Dict[str, Any]
@@ -438,25 +454,53 @@ class EVTParameterCache:
         
         Args:
             asset: Asset name
+            date: Date for time-indexed cache (None for non-time-indexed)
             estimation_window: Estimation window size
             threshold_quantile: Threshold quantile
             parameters: EVT parameters dictionary
         """
-        key = self._make_key(asset, estimation_window, threshold_quantile)
+        if date is None:
+            # Use a dummy date for backward compatibility
+            date = pd.Timestamp('2000-01-01')
+        
+        key = self._make_key(asset, date, estimation_window, threshold_quantile)
         self.cache[key] = parameters
     
     def save_cache(self):
-        """Save cache to disk."""
+        """Save cache to disk as parquet."""
         if self.cache_path:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.cache_path, 'wb') as f:
-                pickle.dump(self.cache, f)
+            
+            # Convert cache to DataFrame for parquet storage
+            cache_records = []
+            for (asset, date, window, quantile), params in self.cache.items():
+                record = {
+                    'asset': asset,
+                    'date': date,
+                    'estimation_window': window,
+                    'threshold_quantile': quantile,
+                    **params
+                }
+                cache_records.append(record)
+            
+            if cache_records:
+                cache_df = pd.DataFrame(cache_records)
+                cache_df.to_parquet(self.cache_path, index=False)
     
     def load_cache(self):
-        """Load cache from disk."""
+        """Load cache from disk (parquet format)."""
         if self.cache_path and self.cache_path.exists():
-            with open(self.cache_path, 'rb') as f:
-                self.cache = pickle.load(f)
+            try:
+                cache_df = pd.read_parquet(self.cache_path)
+                cache_df['date'] = pd.to_datetime(cache_df['date'])
+                
+                for _, row in cache_df.iterrows():
+                    key = (row['asset'], row['date'], row['estimation_window'], row['threshold_quantile'])
+                    params = row.drop(['asset', 'date', 'estimation_window', 'threshold_quantile']).to_dict()
+                    self.cache[key] = params
+            except Exception as e:
+                warnings.warn(f"Failed to load cache from parquet: {e}. Cache will be empty.")
+                self.cache = {}
     
     def get_hit_ratio(self) -> float:
         """Get cache hit ratio."""
@@ -532,3 +576,161 @@ def compute_all_asset_evt_parameters(
                     cache.set(asset, window, quantile, params)
     
     return all_parameters
+
+
+def compute_rolling_asset_evt_parameters(
+    asset_returns: pd.Series,
+    estimation_window: int,
+    threshold_quantile: float,
+    confidence_levels: List[float],
+    horizons: List[int],
+    scaling_rule: str,
+    min_exceedances: int,
+    xi_lower: float,
+    xi_upper: float,
+    gpd_fitting_method: str,
+    return_type: str,
+    tail_side: str,
+    step_size: int = 1,
+    cache: Optional[EVTParameterCache] = None,
+    cache_lock: Optional[Lock] = None
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], List[Dict]]:
+    """
+    Compute rolling EVT parameters and VaR/CVaR time series for a single asset.
+    
+    This function implements rolling window estimation where EVT parameters are
+    fitted for each window position, producing time series of VaR and CVaR values.
+    
+    Args:
+        asset_returns: Series of asset returns with dates as index
+        estimation_window: Size of rolling estimation window
+        threshold_quantile: Threshold quantile for POT
+        confidence_levels: List of confidence levels
+        horizons: List of horizons
+        scaling_rule: Scaling rule for horizon
+        min_exceedances: Minimum number of exceedances
+        xi_lower: Lower bound for shape parameter
+        xi_upper: Upper bound for shape parameter
+        gpd_fitting_method: GPD fitting method ('pwm' or 'mle')
+        return_type: Return type ('log' or 'simple')
+        tail_side: Tail side ('left' or 'right')
+        step_size: Step size for rolling window (default: 1)
+        cache: Optional parameter cache
+        cache_lock: Optional lock for thread-safe cache access
+        
+    Returns:
+        Tuple of (var_series_df, cvar_series_df, evt_params_list)
+        - var_series_df: DataFrame with columns for each conf_level/horizon combination
+        - cvar_series_df: DataFrame with columns for each conf_level/horizon combination
+        - evt_params_list: List of EVT parameter dictionaries for each window
+    """
+    if len(asset_returns) < estimation_window:
+        return None, None, []
+    
+    # Prepare data based on tail_side
+    if tail_side == 'left':
+        # Focus on left tail (losses)
+        working_returns = asset_returns.copy()
+    else:
+        # Focus on right tail (gains) - negate returns
+        working_returns = -asset_returns.copy()
+    
+    # Initialize output structures
+    var_series_dict = {}
+    cvar_series_dict = {}
+    evt_params_list = []
+    dates_list = []
+    
+    # Rolling window loop
+    for start_idx in range(0, len(asset_returns) - estimation_window + 1, step_size):
+        end_idx = start_idx + estimation_window
+        window_returns = working_returns.iloc[start_idx:end_idx]
+        window_date = asset_returns.index[end_idx - 1]  # Use end date of window
+        
+        # Check cache
+        cached_params = None
+        if cache:
+            if cache_lock:
+                cache_lock.acquire()
+            try:
+                cached_params = cache.get(asset_returns.name, window_date, estimation_window, threshold_quantile)
+            finally:
+                if cache_lock:
+                    cache_lock.release()
+        
+        if cached_params and cached_params.get('success', False):
+            params = cached_params
+        else:
+            # Compute EVT parameters for this window
+            params = compute_asset_level_evt_parameters(
+                window_returns,
+                estimation_window,
+                threshold_quantile,
+                min_exceedances,
+                xi_lower,
+                xi_upper
+            )
+            
+            # Store in cache
+            if cache and params.get('success', False):
+                if cache_lock:
+                    cache_lock.acquire()
+                try:
+                    cache.set(asset_returns.name, window_date, estimation_window, threshold_quantile, params)
+                finally:
+                    if cache_lock:
+                        cache_lock.release()
+        
+        if not params.get('success', False):
+            # Skip this window if fitting failed
+            continue
+        
+        # Store EVT parameters
+        evt_params_list.append({
+            'date': window_date,
+            'success': params.get('success', False),
+            'xi': params.get('xi', np.nan),
+            'beta': params.get('beta', np.nan),
+            'threshold': params.get('threshold', np.nan),
+            'num_exceedances': params.get('num_exceedances', 0)
+        })
+        
+        # Compute VaR and CVaR for each confidence level and horizon
+        n = len(window_returns)
+        nu = params.get('num_exceedances', 0)
+        threshold = params.get('threshold', np.nan)
+        xi = params.get('xi', np.nan)
+        beta = params.get('beta', np.nan)
+        
+        for conf_level in confidence_levels:
+            for horizon in horizons:
+                # Compute VaR
+                var_value = compute_var_from_evt(
+                    threshold, xi, beta, n, nu,
+                    conf_level, horizon, scaling_rule
+                )
+                
+                # Compute CVaR
+                cvar_value = compute_cvar_from_evt(var_value, threshold, xi, beta)
+                
+                # Store in series dictionaries
+                var_key = f"var_{conf_level}_{horizon}"
+                cvar_key = f"cvar_{conf_level}_{horizon}"
+                
+                if var_key not in var_series_dict:
+                    var_series_dict[var_key] = []
+                    cvar_series_dict[cvar_key] = []
+                
+                var_series_dict[var_key].append(var_value)
+                cvar_series_dict[cvar_key].append(cvar_value)
+        
+        dates_list.append(window_date)
+    
+    if len(dates_list) == 0:
+        return None, None, []
+    
+    # Create DataFrames
+    var_series_df = pd.DataFrame(var_series_dict, index=pd.DatetimeIndex(dates_list))
+    cvar_series_df = pd.DataFrame(cvar_series_dict, index=pd.DatetimeIndex(dates_list))
+    
+    return var_series_df, cvar_series_df, evt_params_list

@@ -172,7 +172,10 @@ def generate_report(
     # Summary Statistics
     report_lines.append("## Summary Statistics")
     report_lines.append("")
-    report_lines.append(f"- **Total Portfolio-Configuration Combinations:** {len(metrics_df)}")
+    report_lines.append(f"- **Total Asset-Configuration Combinations:** {len(metrics_df)}")
+    if 'asset' in metrics_df.columns:
+        num_assets = metrics_df['asset'].nunique()
+        report_lines.append(f"- **Number of Assets Evaluated:** {num_assets}")
     report_lines.append("")
     
     # Backtesting Results
@@ -246,20 +249,23 @@ def generate_report(
             report_lines.append("  - Lower values indicate more stable tail behavior")
             report_lines.append("")
     
-    # Portfolio Structure Effects
-    if "portfolio_structure_effects" in report_sections:
-        report_lines.append("## Portfolio Structure Effects")
+    # Asset-Level Insights
+    if "asset_level_insights" in report_sections or "portfolio_structure_effects" in report_sections:
+        report_lines.append("## Asset-Level Insights")
         report_lines.append("")
         
-        if 'num_active_assets' in metrics_df.columns:
-            avg_active_assets = metrics_df['num_active_assets'].mean()
-            report_lines.append(f"- **Average Number of Active Assets:** {avg_active_assets:.2f}")
+        if 'asset' in metrics_df.columns:
+            num_assets = metrics_df['asset'].nunique()
+            report_lines.append(f"- **Number of Assets Evaluated:** {num_assets}")
             report_lines.append("")
-        
-        if 'hhi_concentration' in metrics_df.columns:
-            avg_hhi = metrics_df['hhi_concentration'].mean()
-            report_lines.append(f"- **Average HHI Concentration:** {avg_hhi:.4f}")
-            report_lines.append("")
+            
+            # Asset-level statistics
+            if 'hit_rate' in metrics_df.columns:
+                asset_hit_rates = metrics_df.groupby('asset')['hit_rate'].mean()
+                report_lines.append(f"- **Average Hit Rate by Asset:**")
+                report_lines.append(f"  - Mean: {asset_hit_rates.mean():.4f}")
+                report_lines.append(f"  - Std: {asset_hit_rates.std():.4f}")
+                report_lines.append("")
     
     # Stability and Robustness Checks
     if "stability_and_robustness_checks" in report_sections:
@@ -269,7 +275,7 @@ def generate_report(
         if 'tail_index_xi' in metrics_df.columns:
             xi_std = metrics_df['tail_index_xi'].std()
             report_lines.append(f"- **Tail Index (ξ) Standard Deviation:** {xi_std:.4f}")
-            report_lines.append("  - Lower values indicate more stable tail behavior across portfolios")
+            report_lines.append("  - Lower values indicate more stable tail behavior across assets")
             report_lines.append("")
         
         if 'shape_scale_stability' in metrics_df.columns:
@@ -343,9 +349,10 @@ def generate_report(
         report_lines.append("### Recommendations")
         report_lines.append("")
         report_lines.append("- EVT-POT is particularly effective for high confidence levels (99%, 99.5%)")
-        report_lines.append("- Monitor tail index (ξ) for stability across portfolios")
+        report_lines.append("- Monitor tail index (ξ) for stability across assets and time")
         report_lines.append("- Adjust threshold selection based on available data and required exceedances")
-        report_lines.append("- Consider EVT-POT for portfolios with heavy-tailed return distributions")
+        report_lines.append("- Consider EVT-POT for assets with heavy-tailed return distributions")
+        report_lines.append("- Rolling window estimation provides time-varying risk measures")
         report_lines.append("")
     
     # Detailed Metrics Table

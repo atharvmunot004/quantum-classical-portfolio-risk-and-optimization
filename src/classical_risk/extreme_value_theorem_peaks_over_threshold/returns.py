@@ -83,7 +83,7 @@ def load_panel_prices(panel_price_path: Union[str, Path]) -> pd.DataFrame:
     panel_price_path = Path(panel_price_path)
     
     if not panel_price_path.exists():
-        # Try relative to implementation_03 root
+        # Try relative to project root
         current_file = Path(__file__)
         project_root = current_file.parent.parent.parent.parent
         panel_price_path = project_root / panel_price_path
