@@ -1,8 +1,8 @@
 """
 Metrics computation module for EVT-POT VaR and CVaR evaluation.
 
-Computes tail risk, portfolio structure, distribution, and runtime metrics
-with EVT-specific metrics like tail index and shape-scale stability.
+Computes tail risk, distribution, and runtime metrics with EVT-specific metrics
+like tail index and shape-scale stability. All metrics computed in loss space.
 """
 import pandas as pd
 import numpy as np
@@ -12,22 +12,24 @@ import time
 
 
 def compute_tail_metrics(
-    returns: pd.Series,
+    losses: pd.Series,
     var_series: pd.Series,
     confidence_level: float = 0.95
 ) -> Dict[str, float]:
     """
-    Compute tail risk metrics including exceedances for VaR.
+    Compute tail risk metrics including exceedances for VaR using losses.
+    
+    All exceedances computed as (loss - VaR) for violating points.
     
     Args:
-        returns: Series of actual returns
-        var_series: Series of VaR values
+        losses: Series of actual losses (loss_t = -returns_t)
+        var_series: Series of VaR values (positive, represents loss quantile)
         confidence_level: Confidence level used for VaR
         
     Returns:
         Dictionary of tail metrics
     """
-    violations = returns < -var_series
+    violations = losses > var_series
     
     if violations.sum() == 0:
         return {
@@ -38,21 +40,21 @@ def compute_tail_metrics(
             'rmse_var_vs_losses': np.nan
         }
     
-    # Exceedances (actual losses beyond VaR)
-    exceedances = (-returns - var_series)[violations]
+    # Exceedances (actual losses beyond VaR) = (loss - VaR) for violating points
+    exceedances = (losses - var_series)[violations]
     
     mean_exceedance = exceedances.mean()
     max_exceedance = exceedances.max()
     std_exceedance = exceedances.std()
     
-    # Quantile loss (pinball loss) for VaR
+    # Quantile loss (pinball loss) for VaR - computed using losses and VaR
     alpha = 1 - confidence_level
     quantile_loss = np.mean(
-        np.maximum(alpha * (returns + var_series), (alpha - 1) * (returns + var_series))
+        np.maximum(alpha * (losses - var_series), (alpha - 1) * (losses - var_series))
     )
     
     # RMSE between VaR and actual losses (only for violations)
-    rmse_var_vs_losses = np.sqrt(np.mean((var_series[violations] + returns[violations])**2))
+    rmse_var_vs_losses = np.sqrt(np.mean((losses[violations] - var_series[violations])**2))
     
     return {
         'mean_exceedance': mean_exceedance,
@@ -64,25 +66,25 @@ def compute_tail_metrics(
 
 
 def compute_cvar_tail_metrics(
-    returns: pd.Series,
+    losses: pd.Series,
     cvar_series: pd.Series,
     var_series: pd.Series,
     confidence_level: float = 0.95
 ) -> Dict[str, float]:
     """
-    Compute tail risk metrics for CVaR including exceedances.
+    Compute tail risk metrics for CVaR including exceedances using losses.
     
     Args:
-        returns: Series of actual returns
-        cvar_series: Series of CVaR values
+        losses: Series of actual losses (loss_t = -returns_t)
+        cvar_series: Series of CVaR values (positive, represents expected loss given VaR exceeded)
         var_series: Series of VaR values
         confidence_level: Confidence level used for CVaR
         
     Returns:
         Dictionary of CVaR tail metrics
     """
-    # CVaR violations: returns < -CVaR
-    cvar_violations = returns < -cvar_series
+    # CVaR violations: losses > CVaR
+    cvar_violations = losses > cvar_series
     
     if cvar_violations.sum() == 0:
         return {
@@ -92,15 +94,15 @@ def compute_cvar_tail_metrics(
             'rmse_cvar_vs_losses': np.nan
         }
     
-    # Exceedances (actual losses beyond CVaR)
-    cvar_exceedances = (-returns - cvar_series)[cvar_violations]
+    # Exceedances (actual losses beyond CVaR) = (loss - CVaR) for violating points
+    cvar_exceedances = (losses - cvar_series)[cvar_violations]
     
     cvar_mean_exceedance = cvar_exceedances.mean()
     cvar_max_exceedance = cvar_exceedances.max()
     cvar_std_exceedance = cvar_exceedances.std()
     
     # RMSE between CVaR and actual losses (only for violations)
-    rmse_cvar_vs_losses = np.sqrt(np.mean((cvar_series[cvar_violations] + returns[cvar_violations])**2))
+    rmse_cvar_vs_losses = np.sqrt(np.mean((losses[cvar_violations] - cvar_series[cvar_violations])**2))
     
     return {
         'cvar_mean_exceedance': cvar_mean_exceedance,
@@ -111,7 +113,7 @@ def compute_cvar_tail_metrics(
 
 
 def compute_evt_tail_metrics(
-    returns: pd.Series,
+    losses: pd.Series,
     var_series: pd.Series,
     threshold: float,
     xi: float,
@@ -119,11 +121,11 @@ def compute_evt_tail_metrics(
     confidence_level: float = 0.95
 ) -> Dict[str, float]:
     """
-    Compute EVT-specific tail metrics.
+    Compute EVT-specific tail metrics using losses.
     
     Args:
-        returns: Series of returns
-        var_series: Series of VaR values
+        losses: Series of actual losses (loss_t = -returns_t)
+        var_series: Series of VaR values (positive, represents loss quantile)
         threshold: Threshold used for POT
         xi: GPD shape parameter (tail index)
         beta: GPD scale parameter
@@ -132,12 +134,13 @@ def compute_evt_tail_metrics(
     Returns:
         Dictionary of EVT-specific metrics
     """
-    violations = returns < -var_series
+    violations = losses > var_series
     
     # Expected shortfall exceedance (mean exceedance beyond VaR)
+    # Compute ES exceedance only when violations > 0; otherwise NaN
     expected_shortfall_exceedance = np.nan
     if violations.sum() > 0:
-        exceedances = (-returns - var_series)[violations]
+        exceedances = (losses - var_series)[violations]
         expected_shortfall_exceedance = exceedances.mean()
     
     # Tail index (xi) - already provided
@@ -146,7 +149,7 @@ def compute_evt_tail_metrics(
     # Shape-scale stability: coefficient of variation of exceedances
     shape_scale_stability = np.nan
     if violations.sum() > 0:
-        exceedances = (-returns - var_series)[violations]
+        exceedances = (losses - var_series)[violations]
         if len(exceedances) > 1 and exceedances.std() > 0:
             shape_scale_stability = exceedances.std() / exceedances.mean()
     
@@ -155,52 +158,6 @@ def compute_evt_tail_metrics(
         'tail_index_xi': tail_index_xi,
         'scale_beta': beta,
         'shape_scale_stability': shape_scale_stability
-    }
-
-
-def compute_structure_metrics(
-    portfolio_weights: pd.Series,
-    covariance_matrix: Optional[pd.DataFrame] = None
-) -> Dict[str, float]:
-    """
-    Compute portfolio structure metrics.
-    
-    Args:
-        portfolio_weights: Series of portfolio weights
-        covariance_matrix: Optional covariance matrix for condition number
-        
-    Returns:
-        Dictionary of structure metrics
-    """
-    weights_array = portfolio_weights.values
-    active_weights = weights_array[weights_array > 1e-10]  # Non-zero weights
-    
-    num_active_assets = len(active_weights)
-    
-    # HHI (Herfindahl-Hirschman Index) - concentration measure
-    hhi = np.sum(weights_array**2)
-    
-    # Effective number of assets (inverse of HHI)
-    enc = 1 / hhi if hhi > 0 else np.nan
-    
-    # Condition number of covariance matrix
-    condition_number = np.nan
-    if covariance_matrix is not None:
-        try:
-            cov_array = covariance_matrix.values
-            eigenvals = np.linalg.eigvals(cov_array)
-            eigenvals = eigenvals[eigenvals > 1e-10]  # Remove near-zero eigenvalues
-            if len(eigenvals) > 0:
-                condition_number = np.max(eigenvals) / np.min(eigenvals)
-        except:
-            condition_number = np.nan
-    
-    return {
-        'portfolio_size': num_active_assets,
-        'num_active_assets': num_active_assets,
-        'hhi_concentration': hhi,
-        'effective_number_of_assets': enc,
-        'covariance_condition_number': condition_number
     }
 
 
@@ -239,7 +196,10 @@ def compute_distribution_metrics(returns: pd.Series) -> Dict[str, float]:
 
 def compute_runtime_metrics(runtimes: list[float]) -> Dict[str, float]:
     """
-    Compute runtime performance metrics.
+    Compute runtime performance metrics for execution batches.
+    
+    Runtime metrics describe execution batches, not individual model configurations.
+    These should be stored once per experiment run, not per row.
     
     Args:
         runtimes: List of runtime values in seconds
@@ -249,16 +209,18 @@ def compute_runtime_metrics(runtimes: list[float]) -> Dict[str, float]:
     """
     if len(runtimes) == 0:
         return {
-            'runtime_per_portfolio_ms': np.nan,
+            'total_runtime_ms': np.nan,
             'p95_runtime_ms': np.nan,
             'mean_runtime_ms': np.nan,
-            'median_runtime_ms': np.nan
+            'median_runtime_ms': np.nan,
+            'min_runtime_ms': np.nan,
+            'max_runtime_ms': np.nan
         }
     
     runtimes_array = np.array(runtimes)
     
     return {
-        'runtime_per_portfolio_ms': np.mean(runtimes_array) * 1000,
+        'total_runtime_ms': np.sum(runtimes_array) * 1000,
         'p95_runtime_ms': np.percentile(runtimes_array, 95) * 1000,
         'mean_runtime_ms': np.mean(runtimes_array) * 1000,
         'median_runtime_ms': np.median(runtimes_array) * 1000,

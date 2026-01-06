@@ -26,7 +26,8 @@ warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*found in s
 
 from .returns import (
     load_panel_prices,
-    compute_daily_returns
+    compute_daily_returns,
+    compute_losses_from_returns
 )
 from .evt_calculator import (
     compute_rolling_asset_evt_parameters,
@@ -57,8 +58,7 @@ def _process_single_asset_rolling(
     xi_lower: float,
     xi_upper: float,
     gpd_fitting_method: str,
-    return_type: str,
-    tail_side: str,
+    fallback_quantiles: Optional[List[float]],
     cache: Optional[EVTParameterCache] = None,
     cache_lock: Optional[Lock] = None,
     safety_checks: Optional[Dict] = None
@@ -67,7 +67,7 @@ def _process_single_asset_rolling(
     Process a single asset with rolling windows to produce VaR/CVaR time series.
     
     Args:
-        asset_data: Tuple of (asset_name, asset_returns_series)
+        asset_data: Tuple of (asset_name, asset_losses_series)
         estimation_windows: List of estimation window sizes
         threshold_quantiles: List of threshold quantiles
         confidence_levels: List of confidence levels
@@ -86,9 +86,9 @@ def _process_single_asset_rolling(
     Returns:
         Tuple of (risk_series_list, metrics_list, runtime_dict)
     """
-    asset_name, asset_returns = asset_data
+    asset_name, asset_losses = asset_data
     
-    if len(asset_returns) < max(estimation_windows):
+    if len(asset_losses) < max(estimation_windows):
         return [], [], {}
     
     risk_series_list = []
@@ -106,7 +106,7 @@ def _process_single_asset_rolling(
     
     # Process each combination of window, quantile, confidence, horizon
     for window in estimation_windows:
-        if len(asset_returns) < window:
+        if len(asset_losses) < window:
             continue
             
         for quantile in threshold_quantiles:
@@ -115,7 +115,7 @@ def _process_single_asset_rolling(
             
             try:
                 var_series, cvar_series, evt_params_series = compute_rolling_asset_evt_parameters(
-                    asset_returns,
+                    asset_losses,
                     window,
                     quantile,
                     confidence_levels,
@@ -125,15 +125,24 @@ def _process_single_asset_rolling(
                     xi_lower,
                     xi_upper,
                     gpd_fitting_method,
-                    return_type,
-                    tail_side,
+                    fallback_quantiles=fallback_quantiles,
                     cache=cache,
                     cache_lock=cache_lock
                 )
                 
                 runtime_dict['evt_fit_time_ms'] += (time.time() - start_evt) * 1000
                 
-                if var_series is None or len(var_series) == 0:
+                if var_series is None:
+                    warnings.warn(f"No VaR series returned (None) for asset {asset_name}, window {window}, quantile {quantile}")
+                    continue
+                
+                if len(var_series) == 0:
+                    warnings.warn(f"Empty VaR series for asset {asset_name}, window {window}, quantile {quantile}")
+                    continue
+                
+                # Check if all values are NaN (all filtered by guardrails)
+                if var_series.isna().all().all():
+                    warnings.warn(f"All VaR values are NaN for asset {asset_name}, window {window}, quantile {quantile} - all values filtered by guardrails")
                     continue
                 
                 # Create risk series records
@@ -173,69 +182,78 @@ def _process_single_asset_rolling(
                             # Compute backtesting metrics for this configuration
                             start_backtest = time.time()
                             
-                            # Align returns with VaR/CVaR
-                            aligned_returns = asset_returns.loc[var_col.index]
+                            # Align losses with VaR/CVaR
+                            aligned_losses = asset_losses.loc[var_col.index]
                             aligned_var = var_col
                             aligned_cvar = cvar_col
                             
                             # Remove NaN values
-                            valid_mask = ~(pd.isna(aligned_returns) | pd.isna(aligned_var) | pd.isna(aligned_cvar))
-                            aligned_returns = aligned_returns[valid_mask]
+                            valid_mask = ~(pd.isna(aligned_losses) | pd.isna(aligned_var) | pd.isna(aligned_cvar))
+                            aligned_losses = aligned_losses[valid_mask]
                             aligned_var = aligned_var[valid_mask]
                             aligned_cvar = aligned_cvar[valid_mask]
                             
-                            if len(aligned_returns) == 0:
+                            if len(aligned_losses) == 0:
                                 continue
                             
-                            # Compute accuracy metrics
+                            # Compute accuracy metrics using losses
                             accuracy_metrics = compute_accuracy_metrics(
-                                aligned_returns,
+                                aligned_losses,
                                 aligned_var,
                                 confidence_level=conf_level
                             )
                             
-                            # Compute tail metrics
+                            # Compute tail metrics using losses
                             tail_metrics = compute_tail_metrics(
-                                aligned_returns,
+                                aligned_losses,
                                 aligned_var,
                                 confidence_level=conf_level
                             )
                             
-                            # Compute CVaR tail metrics
+                            # Compute CVaR tail metrics using losses
                             cvar_tail_metrics = compute_cvar_tail_metrics(
-                                aligned_returns,
+                                aligned_losses,
                                 aligned_cvar,
                                 aligned_var,
                                 confidence_level=conf_level
                             )
                             
-                            # Get representative EVT parameters (from most recent window)
-                            evt_tail_metrics = {
-                                'expected_shortfall_exceedance': np.nan,
-                                'tail_index_xi': np.nan,
-                                'scale_beta': np.nan,
-                                'shape_scale_stability': np.nan,
-                                'threshold': np.nan,
-                                'num_exceedances': 0
-                            }
-                            
-                            if len(evt_params_series) > 0:
-                                # Get most recent parameters (evt_params_series is a list of dicts)
-                                latest_params = evt_params_series[-1]
-                                if latest_params.get('success', False):
-                                    evt_tail_metrics['tail_index_xi'] = latest_params.get('xi', np.nan)
-                                    evt_tail_metrics['scale_beta'] = latest_params.get('beta', np.nan)
-                                    evt_tail_metrics['threshold'] = latest_params.get('threshold', np.nan)
-                                    evt_tail_metrics['num_exceedances'] = latest_params.get('num_exceedances', 0)
-                                    
-                                    # Compute shape-scale stability from series
-                                    if len(evt_params_series) > 1:
-                                        xi_values = [p.get('xi', np.nan) for p in evt_params_series if p.get('success', False) and not pd.isna(p.get('xi', np.nan))]
-                                        if len(xi_values) > 1:
-                                            evt_tail_metrics['shape_scale_stability'] = float(np.std(xi_values))
-                            
-                            # Compute distribution metrics
+                            # Compute distribution metrics (on returns, not losses)
+                            # Convert losses back to returns for distribution metrics
+                            aligned_returns = -aligned_losses
                             distribution_metrics = compute_distribution_metrics(aligned_returns)
+                            
+                            # Compute EVT tail metrics using losses
+                            if len(evt_params_series) > 0 and evt_params_series[-1].get('success', False):
+                                latest_params = evt_params_series[-1]
+                                evt_tail_metrics = compute_evt_tail_metrics(
+                                    aligned_losses,
+                                    aligned_var,
+                                    latest_params.get('threshold', np.nan),
+                                    latest_params.get('xi', np.nan),
+                                    latest_params.get('beta', np.nan),
+                                    confidence_level=conf_level
+                                )
+                                # Add additional EVT parameters
+                                evt_tail_metrics['threshold'] = latest_params.get('threshold', np.nan)
+                                evt_tail_metrics['num_exceedances'] = latest_params.get('num_exceedances', 0)
+                                
+                                # Compute shape-scale stability from series
+                                if len(evt_params_series) > 1:
+                                    xi_values = [p.get('xi', np.nan) for p in evt_params_series if p.get('success', False) and not pd.isna(p.get('xi', np.nan))]
+                                    if len(xi_values) > 1:
+                                        evt_tail_metrics['shape_scale_stability'] = float(np.std(xi_values))
+                            else:
+                                evt_tail_metrics = {
+                                    'expected_shortfall_exceedance': np.nan,
+                                    'tail_index_xi': np.nan,
+                                    'scale_beta': np.nan,
+                                    'shape_scale_stability': np.nan,
+                                    'threshold': np.nan,
+                                    'num_exceedances': 0
+                                }
+                            
+                            # Remove the old evt_tail_metrics assignment that was here
                             
                             runtime_dict['backtesting_time_ms'] += (time.time() - start_backtest) * 1000
                             
@@ -365,6 +383,11 @@ def evaluate_evt_pot_var_cvar(
     daily_returns = daily_returns[valid_assets]
     print(f"  Daily returns: {len(daily_returns)} dates, {len(daily_returns.columns)} assets (after filtering)")
     
+    # Compute explicit loss series: loss_t = -returns_t
+    print(f"\nComputing losses from returns...")
+    daily_losses = compute_losses_from_returns(daily_returns)
+    print(f"  Daily losses: {len(daily_losses)} dates, {len(daily_losses.columns)} assets")
+    
     # Get EVT settings
     evt_settings = config.get('evt_settings', {})
     confidence_levels = evt_settings.get('confidence_levels', [0.95, 0.99])
@@ -377,6 +400,7 @@ def evaluate_evt_pot_var_cvar(
     threshold_settings = evt_settings.get('threshold_selection', {})
     threshold_quantiles = threshold_settings.get('quantiles', [0.95])
     min_exceedances = threshold_settings.get('min_exceedances', 50)
+    fallback_quantiles = threshold_settings.get('fallback_quantiles_if_insufficient', [0.9, 0.85, 0.8, 0.75, 0.7])
     shape_constraints = evt_settings.get('shape_constraints', {})
     xi_lower = shape_constraints.get('xi_lower_bound', -0.5)
     xi_upper = shape_constraints.get('xi_upper_bound', 0.5)
@@ -433,8 +457,8 @@ def evaluate_evt_pot_var_cvar(
             cache_lock = manager.Lock()
             print(f"  Cache path: {cache_path}")
     
-    # Prepare asset data
-    asset_data_list = [(asset, daily_returns[asset].dropna()) for asset in daily_returns.columns]
+    # Prepare asset data (using losses, not returns)
+    asset_data_list = [(asset, daily_losses[asset].dropna()) for asset in daily_losses.columns]
     
     print(f"\n{'='*80}")
     print("Processing Assets with Rolling EVT Estimation")
@@ -464,8 +488,7 @@ def evaluate_evt_pot_var_cvar(
             xi_lower=xi_lower,
             xi_upper=xi_upper,
             gpd_fitting_method=gpd_fitting_method,
-            return_type=return_type,
-            tail_side=tail_side,
+            fallback_quantiles=fallback_quantiles,
             cache=cache,
             cache_lock=cache_lock,
             safety_checks=safety_checks
@@ -508,8 +531,7 @@ def evaluate_evt_pot_var_cvar(
                 xi_lower,
                 xi_upper,
                 gpd_fitting_method,
-                return_type,
-                tail_side,
+                fallback_quantiles,
                 cache=cache,
                 cache_lock=cache_lock,
                 safety_checks=safety_checks
@@ -531,20 +553,27 @@ def evaluate_evt_pot_var_cvar(
     
     # Create DataFrames
     if len(all_risk_series) == 0:
-        raise ValueError("No risk series computed. Check data and configuration.")
+        # Provide more helpful error message
+        print(f"\nWARNING: No risk series computed!")
+        print(f"  Total assets processed: {len(asset_data_list)}")
+        print(f"  Total metrics records: {len(all_metrics)}")
+        print(f"  This may indicate:")
+        print(f"    - VaR guardrails are too strict (VaR <= threshold)")
+        print(f"    - CVaR domain checks failing (xi >= 1)")
+        print(f"    - Insufficient exceedances for EVT fitting")
+        print(f"    - All computed VaR/CVaR values are invalid")
+        raise ValueError("No risk series computed. Check data and configuration. All VaR/CVaR values may have been filtered out by guardrails.")
     
     risk_series_df = pd.DataFrame(all_risk_series)
     metrics_df = pd.DataFrame(all_metrics)
     
-    # Add runtime metrics to metrics_df
+    # Runtime metrics should NOT be per-row (IEEE reviewers flag duplicated runtime columns)
+    # Store runtime metrics separately, not broadcast to every configuration row
+    runtime_metrics_dict = {}
     if len(all_runtimes) > 0:
-        runtime_metrics = compute_runtime_metrics([r.get('total_runtime_ms', 0) / 1000 for r in all_runtimes])
-        for key, value in runtime_metrics.items():
-            metrics_df[key] = value
-        
-        # Add cache hit ratio if available
+        runtime_metrics_dict = compute_runtime_metrics([r.get('total_runtime_ms', 0) / 1000 for r in all_runtimes])
         if cache:
-            metrics_df['cache_hit_ratio'] = cache.get_hit_ratio()
+            runtime_metrics_dict['cache_hit_ratio'] = cache.get_hit_ratio()
     
     print(f"\nCompleted evaluation:")
     print(f"  Total runtime: {total_runtime/60:.2f} minutes ({total_runtime:.2f} seconds)")
@@ -581,8 +610,8 @@ def evaluate_evt_pot_var_cvar(
                             if len(config_risk) == 0:
                                 continue
                             
-                            # Get asset returns
-                            asset_returns = daily_returns[asset].dropna()
+                            # Get asset losses
+                            asset_losses = daily_losses[asset].dropna()
                             
                             # Create VaR/CVaR series
                             var_series = pd.Series(
@@ -594,19 +623,19 @@ def evaluate_evt_pot_var_cvar(
                                 index=pd.to_datetime(config_risk['date'])
                             )
                             
-                            # Align returns
-                            common_dates = asset_returns.index.intersection(var_series.index)
+                            # Align losses
+                            common_dates = asset_losses.index.intersection(var_series.index)
                             if len(common_dates) < min_obs_per_slice:
                                 continue
                             
-                            aligned_returns = asset_returns.loc[common_dates]
+                            aligned_losses = asset_losses.loc[common_dates]
                             aligned_var = var_series.loc[common_dates]
                             aligned_cvar = cvar_series.loc[common_dates]
                             
-                            # Compute time-sliced metrics
+                            # Compute time-sliced metrics using losses
                             for slice_by in slice_by_list:
                                 time_slices = compute_time_sliced_metrics(
-                                    aligned_returns,
+                                    aligned_losses,
                                     aligned_var,
                                     cvar_series=aligned_cvar,
                                     confidence_level=conf_level,

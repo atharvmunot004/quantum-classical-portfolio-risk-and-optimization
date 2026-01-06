@@ -1,11 +1,12 @@
 """
 Returns computation module for EVT-POT VaR/CVaR evaluation.
 
-Computes daily returns from price data and portfolio returns from portfolio weights.
+Computes daily returns from price data and explicit loss series.
+Loss definition: loss_t = -returns_t (consistent with EVT-POT theory).
 """
 import pandas as pd
 import numpy as np
-from typing import Union, Optional
+from typing import Union, Optional, Tuple
 from pathlib import Path
 
 
@@ -34,6 +35,27 @@ def compute_daily_returns(
     returns = returns.dropna()
     
     return returns
+
+
+def compute_losses_from_returns(
+    returns: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Compute explicit loss series from returns.
+    
+    Global invariant: loss_t = -returns_t
+    
+    This ensures consistent loss definition across all modules and prevents
+    silent sign mismatches.
+    
+    Args:
+        returns: DataFrame of returns with dates as index and assets as columns
+        
+    Returns:
+        DataFrame of losses with same index and columns as returns
+    """
+    losses = -returns
+    return losses
 
 
 def compute_portfolio_returns(

@@ -183,16 +183,42 @@ def generate_report(
         report_lines.append("## Backtesting Results")
         report_lines.append("")
         
-        if 'hit_rate' in metrics_df.columns:
-            avg_hit_rate = metrics_df['hit_rate'].mean()
-            report_lines.append(f"- **Average Hit Rate:** {avg_hit_rate:.4f}")
+        # Hit rate sanity check: explicitly report expected vs observed hit_rate per confidence level
+        if 'hit_rate' in metrics_df.columns and 'confidence_level' in metrics_df.columns:
+            report_lines.append("### Hit Rate Calibration Check")
             report_lines.append("")
+            for conf_level in sorted(metrics_df['confidence_level'].unique()):
+                conf_metrics = metrics_df[metrics_df['confidence_level'] == conf_level]
+                if len(conf_metrics) > 0:
+                    expected_rate = 1 - conf_level
+                    observed_rate = conf_metrics['hit_rate'].mean()
+                    report_lines.append(f"**Confidence Level {conf_level:.0%}:**")
+                    report_lines.append(f"  - Expected violation rate: {expected_rate:.4f}")
+                    report_lines.append(f"  - Observed hit rate: {observed_rate:.4f}")
+                    report_lines.append(f"  - Difference: {abs(observed_rate - expected_rate):.4f}")
+                    
+                    # Validation bounds
+                    if conf_level == 0.95:
+                        bounds = [0.03, 0.08]
+                    elif conf_level == 0.99:
+                        bounds = [0.005, 0.02]
+                    else:
+                        bounds = None
+                    
+                    if bounds:
+                        if bounds[0] <= observed_rate <= bounds[1]:
+                            report_lines.append(f"  - ✓ Within acceptable bounds [{bounds[0]:.3f}, {bounds[1]:.3f}]")
+                        else:
+                            report_lines.append(f"  - ⚠ Outside acceptable bounds [{bounds[0]:.3f}, {bounds[1]:.3f}]")
+                    report_lines.append("")
         
         if 'violation_ratio' in metrics_df.columns:
             avg_violation_ratio = metrics_df['violation_ratio'].mean()
             report_lines.append(f"- **Average Violation Ratio:** {avg_violation_ratio:.4f}")
-            report_lines.append("  - Ratio > 1 indicates overestimation of risk")
-            report_lines.append("  - Ratio < 1 indicates underestimation of risk")
+            report_lines.append("  - Ratio > 1 indicates underestimation of risk (excessive VaR breaches)")
+            report_lines.append("  - Ratio < 1 indicates overestimation of risk")
+            if avg_violation_ratio < 0.7 or avg_violation_ratio > 1.3:
+                report_lines.append(f"  - ⚠ Warning: Violation ratio outside acceptable bounds [0.7, 1.3]")
             report_lines.append("")
         
         if 'traffic_light_zone' in metrics_df.columns:
@@ -240,7 +266,22 @@ def generate_report(
         
         if 'tail_index_xi' in metrics_df.columns:
             avg_xi = metrics_df['tail_index_xi'].mean()
-            report_lines.append(f"- **Average Tail Index (ξ):** {avg_xi:.4f}")
+            std_xi = metrics_df['tail_index_xi'].std()
+            report_lines.append(f"- **Average Tail Index (ξ):** {avg_xi:.4f} (std: {std_xi:.4f})")
+            
+            # Xi boundary warning: warn when xi frequently hits constraint bounds
+            # Check if xi values are near bounds (assuming bounds are -0.5 and 0.5 from config)
+            near_lower = (metrics_df['tail_index_xi'] <= -0.45).sum()
+            near_upper = (metrics_df['tail_index_xi'] >= 0.45).sum()
+            total = len(metrics_df)
+            
+            if near_lower > 0.1 * total:
+                report_lines.append(f"  - ⚠ Warning: {near_lower}/{total} ({100*near_lower/total:.1f}%) configurations near lower bound (-0.5)")
+                report_lines.append("    This may indicate threshold instability or poor tail regime")
+            if near_upper > 0.1 * total:
+                report_lines.append(f"  - ⚠ Warning: {near_upper}/{total} ({100*near_upper/total:.1f}%) configurations near upper bound (0.5)")
+                report_lines.append("    This may indicate threshold instability or poor tail regime")
+            
             report_lines.append("")
         
         if 'shape_scale_stability' in metrics_df.columns:
@@ -328,9 +369,9 @@ def generate_report(
         if 'violation_ratio' in metrics_df.columns:
             avg_vr = metrics_df['violation_ratio'].mean()
             if avg_vr > 1.2:
-                report_lines.append("- **Risk Overestimation:** EVT-POT tends to overestimate risk")
+                report_lines.append("- **Risk Underestimation:** EVT-POT tends to underestimate risk (excessive VaR breaches)")
             elif avg_vr < 0.8:
-                report_lines.append("- **Risk Underestimation:** EVT-POT tends to underestimate risk")
+                report_lines.append("- **Risk Overestimation:** EVT-POT tends to overestimate risk")
             else:
                 report_lines.append("- **Adequate Risk Estimation:** EVT-POT provides reasonable risk estimates")
             report_lines.append("")
