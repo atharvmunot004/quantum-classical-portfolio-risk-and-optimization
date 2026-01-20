@@ -14,6 +14,8 @@ def generate_report(
     metrics_df: pd.DataFrame,
     output_path: Union[str, Path],
     monte_carlo_settings: Optional[Dict] = None,
+    risk_series_df: Optional[pd.DataFrame] = None,
+    time_sliced_metrics_df: Optional[pd.DataFrame] = None,
     report_sections: Optional[List[str]] = None
 ) -> str:
     """
@@ -23,6 +25,8 @@ def generate_report(
         metrics_df: DataFrame with all computed metrics
         output_path: Path to save the report
         monte_carlo_settings: Dictionary with Monte Carlo settings
+        risk_series_df: Optional DataFrame with risk series data
+        time_sliced_metrics_df: Optional DataFrame with time-sliced metrics
         report_sections: List of sections to include (default matches llm.json spec)
         
     Returns:
@@ -41,9 +45,11 @@ def generate_report(
     report_lines = []
     
     # Header
-    report_lines.append("# Monte Carlo Simulation for VaR/CVaR Evaluation Report")
+    report_lines.append("# Monte Carlo Simulation for VaR/CVaR Evaluation Report (Asset Level)")
     report_lines.append("")
     report_lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report_lines.append("")
+    report_lines.append("**Scope:** Asset-level evaluation only (no portfolio aggregation)")
     report_lines.append("")
     
     # Model Configuration
@@ -88,21 +94,29 @@ def generate_report(
     if "simulation_design" in report_sections:
         report_lines.append("## Methodology Overview")
         report_lines.append("")
-        report_lines.append("### Monte Carlo Simulation for VaR and CVaR")
+        report_lines.append("### Monte Carlo Simulation for VaR and CVaR (Asset Level)")
         report_lines.append("")
-        report_lines.append("Monte Carlo simulation generates multiple scenarios of portfolio returns based on historical data.")
-        report_lines.append("VaR and CVaR are then calculated from the distribution of simulated returns.")
+        report_lines.append("Monte Carlo simulation generates multiple scenarios of asset returns based on historical data.")
+        report_lines.append("VaR and CVaR are then calculated from the distribution of simulated returns per asset.")
+        report_lines.append("")
+        report_lines.append("**Design Principle:**")
+        report_lines.append("- Asset-level only: evaluation is performed strictly on individual asset return series")
+        report_lines.append("- No portfolio aggregation: all metrics computed per asset")
+        report_lines.append("- Rolling window parameter estimation per asset")
+        report_lines.append("- Forward return paths simulated per asset")
         report_lines.append("")
         report_lines.append("**Advantages:**")
         report_lines.append("- Can capture non-normal distributions")
         report_lines.append("- Flexible with different distribution assumptions")
         report_lines.append("- Provides both VaR and CVaR estimates")
+        report_lines.append("- Statistically coherent evaluation without portfolio aggregation confounds")
         report_lines.append("")
         report_lines.append("**Method:**")
-        report_lines.append("1. Estimate mean and covariance from historical returns")
-        report_lines.append("2. Simulate multiple scenarios of future returns")
-        report_lines.append("3. Calculate VaR as the quantile of simulated losses")
-        report_lines.append("4. Calculate CVaR as the expected loss beyond VaR")
+        report_lines.append("1. Estimate mean and volatility from historical returns per asset (rolling window)")
+        report_lines.append("2. Simulate multiple scenarios of future returns per asset")
+        report_lines.append("3. Calculate VaR as the quantile of simulated losses per asset")
+        report_lines.append("4. Calculate CVaR as the expected loss beyond VaR per asset")
+        report_lines.append("5. Perform backtesting and time-sliced evaluation per asset")
         report_lines.append("")
     
         report_lines.append("## Simulation Design")
@@ -128,17 +142,22 @@ def generate_report(
             report_lines.append("")
             report_lines.append("### Design Principle")
             report_lines.append("")
-            report_lines.append("- Asset-level simulation with portfolio projection")
-            report_lines.append("- Scenarios estimated once per estimation window and reused across portfolios")
-            report_lines.append("- Batched execution for scalability")
+            report_lines.append("- Asset-level simulation only (no portfolio projection)")
+            report_lines.append("- Parameter estimation per asset using rolling windows")
+            report_lines.append("- Forward return paths simulated per asset")
+            report_lines.append("- Parallel execution across assets for scalability")
             report_lines.append("")
     
-    # Batch Execution Summary
-    if "batch_execution_summary" in report_sections:
-        report_lines.append("## Batch Execution Summary")
+    # Summary
+    if "batch_execution_summary" in report_sections or "summary" in report_sections:
+        report_lines.append("## Summary")
         report_lines.append("")
-        report_lines.append(f"- **Total Portfolios Evaluated:** {len(metrics_df['portfolio_id'].unique()) if 'portfolio_id' in metrics_df.columns else 'N/A'}")
+        report_lines.append(f"- **Total Assets Evaluated:** {len(metrics_df['asset'].unique()) if 'asset' in metrics_df.columns else 'N/A'}")
         report_lines.append(f"- **Total Configurations:** {len(metrics_df)}")
+        if risk_series_df is not None:
+            report_lines.append(f"- **Total Risk Series Observations:** {len(risk_series_df):,}")
+        if time_sliced_metrics_df is not None and len(time_sliced_metrics_df) > 0:
+            report_lines.append(f"- **Total Time-Sliced Metrics:** {len(time_sliced_metrics_df):,}")
         report_lines.append("")
     
     # Aggregate Backtesting Results

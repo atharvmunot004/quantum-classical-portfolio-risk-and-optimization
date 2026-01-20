@@ -1,0 +1,92 @@
+{
+  "description": "GARCH(1,1) VaR/CVaR evaluation results at asset level",
+  "files": {
+    "volatility_series": {
+      "path": "results/classical_risk/garch_asset_conditional_volatility_series.parquet",
+      "columns": [
+        "asset",
+        "date",
+        "estimation_window",
+        "sigma_t",
+        "sigma_t2",
+        "one_step_forecast_sigma",
+        "one_step_forecast_sigma2"
+      ],
+      "row_granularity": "asset_x_date_x_estimation_window"
+    },
+    "risk_series": {
+      "path": "results/classical_risk/garch_asset_var_cvar_series.parquet",
+      "columns": [
+        "asset",
+        "date",
+        "confidence_level",
+        "horizon",
+        "estimation_window",
+        "VaR",
+        "CVaR"
+      ],
+      "row_granularity": "asset_x_date_x_confidence_level_x_horizon_x_estimation_window"
+    },
+    "metrics_table": {
+      "path": "results/classical_risk/garch_asset_level_metrics.parquet",
+      "row_granularity": "asset_x_confidence_x_horizon_x_window",
+      "columns": "All metrics from accuracy, tail_behavior_var, tail_behavior_cvar, garch_specific, distribution, runtime"
+    },
+    "time_sliced_metrics_table": {
+      "path": "results/classical_risk/garch_asset_level_time_sliced_metrics.parquet",
+      "row_granularity": "asset_x_slice_type_x_slice_value_x_confidence_x_horizon_x_window"
+    }
+  },
+  "metadata": {
+    "task": "garch_1_1_var_cvar_asset_level_evaluation_optimized",
+    "generated_at": "2026-01-20T20:13:05.421572",
+    "garch_settings": {
+      "model_type": "GARCH",
+      "p": 1,
+      "q": 1,
+      "mean_model": {
+        "enabled": false
+      },
+      "distribution": "t",
+      "student_t_df": 5,
+      "estimation_windows": [
+        252,
+        500
+      ],
+      "rolling": {
+        "enabled": true,
+        "step_size": 1,
+        "warmup_policy": "skip_until_window_full",
+        "vol_series_mode": "rolling_time_series",
+        "forecast_method": "rolling",
+        "forecast_target": "one_step_ahead"
+      },
+      "constraints": {
+        "omega_lower_bound": 1e-12,
+        "alpha_lower_bound": 0.0,
+        "beta_lower_bound": 0.0,
+        "stationarity_enforced": true,
+        "stationarity_rule": "alpha + beta < 1"
+      },
+      "fallback_long_run_variance": true,
+      "fallback_policy": {
+        "on_fit_fail": "use_ewma_or_sample_var",
+        "ewma_lambda": 0.94,
+        "min_variance_floor": 1e-12
+      },
+      "confidence_levels": [
+        0.95,
+        0.99
+      ],
+      "horizons": {
+        "base_horizon": 1,
+        "scaled_horizons": [
+          10
+        ],
+        "scaling_rule": "sqrt_time",
+        "note": "Scale VaR/CVaR magnitude by horizon using sqrt-time on conditional volatility; do not change confidence level with horizon."
+      },
+      "random_seed": 42
+    }
+  }
+}
