@@ -1,0 +1,94 @@
+{
+  "risk_series": {
+    "path": "results/classical_risk/varcov_asset_var_series.parquet",
+    "rows": 167680,
+    "columns": [
+      "asset",
+      "date",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "VaR"
+    ],
+    "description": "Time series of VaR values per asset, date, confidence level, horizon, and estimation window. Each row represents a single VaR estimate at a specific point in time."
+  },
+  "metrics": {
+    "path": "results/classical_risk/varcov_asset_level_metrics.parquet",
+    "rows": 80,
+    "columns": [
+      "asset",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "hit_rate",
+      "violation_ratio",
+      "kupiec_unconditional_coverage",
+      "kupiec_test_statistic",
+      "kupiec_reject_null",
+      "christoffersen_independence",
+      "christoffersen_independence_statistic",
+      "christoffersen_independence_reject_null",
+      "christoffersen_conditional_coverage",
+      "christoffersen_conditional_coverage_statistic",
+      "christoffersen_conditional_coverage_reject_null",
+      "num_violations",
+      "total_observations",
+      "expected_violations",
+      "traffic_light_zone",
+      "mean_exceedance",
+      "max_exceedance",
+      "std_exceedance",
+      "quantile_loss_score",
+      "rmse_var_vs_losses",
+      "skewness",
+      "kurtosis",
+      "jarque_bera_p_value",
+      "jarque_bera_statistic",
+      "rolling_mean",
+      "rolling_volatility"
+    ],
+    "description": "Aggregated backtesting metrics over the full evaluation period per asset. Row granularity: asset × confidence_level × horizon × estimation_window. Includes accuracy metrics (hit rate, violation ratio, statistical tests), tail behavior metrics (exceedances), and distributional characteristics (normality tests, skewness, kurtosis)."
+  },
+  "time_sliced_metrics": {
+    "path": "results/classical_risk/varcov_asset_level_time_sliced_metrics.parquet",
+    "rows": 11800,
+    "columns": [
+      "slice",
+      "start_date",
+      "end_date",
+      "hit_rate",
+      "num_violations",
+      "expected_violations",
+      "violation_ratio",
+      "asset",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "slice_type"
+    ],
+    "description": "Time-sliced backtesting metrics computed for specific time periods (year, quarter, month). Row granularity: asset × slice_type × slice_value × confidence_level × horizon × estimation_window. Enables analysis of temporal patterns in VaR performance."
+  },
+  "parameter_store": {
+    "path": "cache/varcov_asset_parameters.parquet",
+    "rows": 167680,
+    "columns": [
+      "asset",
+      "date",
+      "estimation_window",
+      "rolling_mean",
+      "rolling_volatility",
+      "fit_success"
+    ],
+    "description": "Cached rolling mean and volatility parameters estimated per asset, date, and estimation window. Used for computational efficiency and parameter tracking. fit_success indicates whether the parameter estimation was successful."
+  },
+  "metadata": {
+    "methodology": "Variance-Covariance (Parametric) VaR",
+    "distributional_assumption": "normal",
+    "evaluation_scope": "asset_level_only",
+    "portfolio_projection": false,
+    "formula": "VaR_h = -μ + z_{1-α} * σ * √(h)",
+    "mean_estimator": "sample_mean",
+    "volatility_estimator": "sample_std",
+    "note": "VaR is estimated strictly per asset using rolling windows under the assumption of conditional normality. No portfolio aggregation or cross-asset covariance modeling is performed."
+  }
+}
