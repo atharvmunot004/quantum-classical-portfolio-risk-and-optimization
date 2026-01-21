@@ -2,9 +2,9 @@
   "task": "monte_carlo_var_cvar_asset_level_evaluation_optimized",
 
   "design_principle": {
-    "mc_scope": "asset_level_only",
+    "mcs_scope": "asset_level_only",
     "portfolio_projection": false,
-    "rationale": "Monte Carlo simulation is calibrated and evaluated strictly on individual asset return series. Parametric return distributions are estimated using rolling windows, and forward return paths are simulated to obtain empirical VaR and CVaR per asset and time. All backtesting, tail diagnostics, and time-sliced evaluations (year/quarter/month) are computed per asset, ensuring IEEE Access-grade empirical rigor without portfolio aggregation assumptions."
+    "rationale": "Monte Carlo simulation is performed strictly per asset return series to generate VaR/CVaR forecasts under alternative data-generating assumptions (historical bootstrap, parametric Normal, parametric Student-t, and optional volatility-filtered simulation). Forecasts are produced as rolling time series using rolling estimation windows. VaR/CVaR are computed per asset for multiple confidence levels and horizons. Backtesting, tail diagnostics, distribution diagnostics, and time-sliced evaluation (year/quarter/month) are computed per asset without portfolio aggregation assumptions."
   },
 
   "inputs": {
@@ -31,21 +31,78 @@
   },
 
   "monte_carlo_settings": {
-    "distribution": "normal",
-    "parameter_estimation": {
-      "method": "rolling_sample_moments",
-      "parameters": ["mean", "volatility"],
-      "demean_returns": true
-    },
+    "simulation_family": "returns_based",
+    "methods": [
+      {
+        "name": "historical_bootstrap",
+        "enabled": true,
+        "bootstrap_type": "iid",
+        "block_bootstrap": {
+          "enabled": false,
+          "block_length": 5,
+          "note": "Enable to preserve short-range dependence; block_length typically 5-20 for daily data."
+        },
+        "center_and_scale": {
+          "enabled": false,
+          "center_rule": "subtract_mean",
+          "scale_rule": "divide_by_std",
+          "note": "Optional: standardize in-window returns, resample standardized shocks, then re-scale by in-window mean/std or filtered sigma."
+        }
+      },
+      {
+        "name": "parametric_normal",
+        "enabled": true,
+        "fit": {
+          "mu": "sample_mean",
+          "sigma": "sample_std"
+        }
+      },
+      {
+        "name": "parametric_student_t",
+        "enabled": true,
+        "fit": {
+          "mu": "sample_mean",
+          "sigma": "sample_std",
+          "df": {
+            "mode": "mle_or_fixed",
+            "fixed_df": 5,
+            "bounds": [2.1, 50.0],
+            "fallback_df": 5
+          }
+        }
+      },
+      {
+        "name": "filtered_ewma_bootstrap",
+        "enabled": false,
+        "filter": {
+          "type": "ewma",
+          "lambda": 0.94,
+          "min_variance_floor": 1e-12
+        },
+        "shock_resampling": {
+          "source": "standardized_residuals",
+          "bootstrap_type": "iid",
+          "block_bootstrap": {
+            "enabled": false,
+            "block_length": 5
+          }
+        },
+        "reconstruction": {
+          "use_next_sigma_forecast": true,
+          "mu_rule": "zero_or_sample_mean",
+          "note": "Compute standardized residuals e_t = r_t / sigma_t; resample e_t; simulate r_{t+1} = mu + sigma_{t+1} * e*."
+        }
+      }
+    ],
 
     "estimation_windows": [252, 500],
 
-    "simulation": {
-      "num_simulations": 100000,
-      "path_length": 1,
-      "antithetic_variates": true,
-      "moment_matching": true,
-      "reuse_random_draws_across_assets": false
+    "rolling": {
+      "enabled": true,
+      "step_size": 1,
+      "warmup_policy": "skip_until_window_full",
+      "forecast_method": "rolling",
+      "forecast_target": "one_step_ahead"
     },
 
     "confidence_levels": [0.95, 0.99],
@@ -53,18 +110,21 @@
     "horizons": {
       "base_horizon": 1,
       "scaled_horizons": [10],
-      "scaling_rule": "sqrt_time",
-      "note": "Multi-horizon risk is computed by scaling simulated one-step volatility using sqrt-time; confidence levels remain unchanged."
+      "horizon_handling": "path_simulation",
+      "note": "For multi-day horizons, simulate return paths and compute VaR/CVaR on aggregated horizon return (sum of daily simulated returns). Avoid sqrt-time unless explicitly benchmarking."
     },
 
-    "rolling": {
-      "enabled": true,
-      "step_size": 1,
-      "warmup_policy": "skip_until_window_full",
-      "var_cvar_series_mode": "rolling_time_series"
-    },
+    "num_simulations": 20000,
+    "path_aggregation_rule": "sum",
+    "random_seed": 42,
 
-    "random_seed": 42
+    "risk_measure_definition": {
+      "var_definition": "positive_loss_number",
+      "cvar_definition": "expected_shortfall_positive_loss_number",
+      "loss_transform": "loss = -return",
+      "tail_side": "left",
+      "notes": "For left-tail risk, define loss_t = -r_t. VaR is the alpha-quantile of loss. CVaR is the mean loss exceeding VaR."
+    }
   },
 
   "computation_strategy": {
@@ -79,22 +139,24 @@
 
     "cache": {
       "enabled": true,
-      "scope": "per_asset_per_window_per_time_index",
+      "scope": "per_asset_per_method_per_window_per_time_index",
       "store_format": "parquet",
 
-      "parameter_store_path": "cache/monte_carlo_asset_parameters.parquet",
-      "simulation_store_path": "cache/monte_carlo_asset_simulated_returns.parquet",
+      "fitted_params_store_path": "cache/mcs_asset_fitted_parameters.parquet",
+      "risk_series_store_path": "cache/mcs_asset_var_cvar_series.parquet",
+      "simulation_meta_store_path": "cache/mcs_asset_simulation_metadata.parquet",
 
       "key_fields": [
         "asset",
         "date",
+        "method",
         "estimation_window",
-        "distribution",
-        "num_simulations",
         "confidence_level",
         "horizon",
         "tail_side",
-        "return_type"
+        "return_type",
+        "num_simulations",
+        "random_seed"
       ],
 
       "write_mode": "append_or_upsert",
@@ -106,7 +168,7 @@
       "measure": [
         "total_runtime_ms",
         "returns_compute_time_ms",
-        "parameter_estimation_time_ms",
+        "window_fit_time_ms",
         "simulation_time_ms",
         "var_compute_time_ms",
         "cvar_compute_time_ms",
@@ -119,19 +181,29 @@
       "enabled": true,
       "checks": [
         {
+          "name": "finite_returns_window",
+          "rule": "all(isfinite(returns_window))",
+          "on_fail": "skip_timestamp"
+        },
+        {
+          "name": "sufficient_window_variation",
+          "rule": "std(returns_window) > 0",
+          "on_fail": "fallback_to_small_variance_floor"
+        },
+        {
           "name": "var_positive",
           "rule": "VaR > 0",
-          "on_fail": "skip_timestamp"
+          "on_fail": "flag_and_continue"
+        },
+        {
+          "name": "cvar_ge_var",
+          "rule": "CVaR >= VaR",
+          "on_fail": "flag_and_continue"
         },
         {
           "name": "expected_hit_rate_sanity",
           "rule": "abs(hit_rate - (1 - confidence_level)) <= 5 * (1 - confidence_level)",
           "on_fail": "flag_and_continue"
-        },
-        {
-          "name": "sufficient_simulations",
-          "rule": "num_simulations >= 10000",
-          "on_fail": "abort_run"
         }
       ]
     }
@@ -155,7 +227,7 @@
         "christoffersen_conditional_coverage",
         "traffic_light_zone"
       ],
-      "notes": "Backtesting is performed on aligned (realized returns, Monte Carlo VaR, Monte Carlo CVaR) time series per asset."
+      "notes": "Backtesting is performed on aligned (returns, VaR, CVaR) time series per asset-method. Violations are defined for left-tail risk: loss_t = -return_t; violation if loss_t > VaR_t."
     },
 
     "time_sliced_metrics": {
@@ -207,13 +279,17 @@
       "rmse_cvar_vs_losses"
     ],
 
-    "monte_carlo_specific": [
-      "estimated_mean",
-      "estimated_volatility",
+    "simulation_specific": [
+      "method",
       "num_simulations",
-      "simulation_bias",
-      "variance_of_simulated_returns",
-      "tail_quantile_stability"
+      "seed",
+      "window_mu",
+      "window_sigma",
+      "student_t_df",
+      "ewma_lambda",
+      "effective_sample_size",
+      "fit_success",
+      "convergence_flag"
     ],
 
     "distribution": [
@@ -231,32 +307,38 @@
       "median_runtime_ms",
       "min_runtime_ms",
       "max_runtime_ms",
+      "window_fit_time_ms",
       "simulation_time_ms",
       "cache_hit_ratio"
     ]
   },
 
   "outputs": {
-    "parameter_store": {
-      "path": "cache/monte_carlo_asset_parameters.parquet",
+    "fitted_parameter_store": {
+      "path": "cache/mcs_asset_fitted_parameters.parquet",
       "contents": [
         "asset",
         "date",
+        "method",
         "estimation_window",
-        "estimated_mean",
-        "estimated_volatility",
-        "distribution",
-        "num_simulations",
-        "fit_success"
-      ]
+        "window_mu",
+        "window_sigma",
+        "student_t_df",
+        "ewma_lambda",
+        "effective_sample_size",
+        "fit_success",
+        "convergence_flag"
+      ],
+      "notes": "Per rolling timestamp and method: stores fitted param summaries (or filter settings) used to generate simulations."
     },
 
     "risk_series_store": {
-      "path": "results/classical_risk/monte_carlo_asset_var_cvar_series.parquet",
+      "path": "results/classical_risk/mcs_asset_var_cvar_series.parquet",
       "format": "parquet",
       "contents": [
         "asset",
         "date",
+        "method",
         "confidence_level",
         "horizon",
         "estimation_window",
@@ -266,31 +348,31 @@
     },
 
     "metrics_table": {
-      "path": "results/classical_risk/monte_carlo_asset_level_metrics.parquet",
+      "path": "results/classical_risk/mcs_asset_level_metrics.parquet",
       "format": "parquet",
-      "row_granularity": "asset_x_confidence_x_horizon_x_window",
-      "notes": "Aggregated metrics over the full backtest period per asset and configuration."
+      "row_granularity": "asset_x_method_x_confidence_x_horizon_x_window",
+      "notes": "Aggregated metrics over the full backtest period per asset, Monte Carlo method, and configuration."
     },
 
     "time_sliced_metrics_table": {
-      "path": "results/classical_risk/monte_carlo_asset_level_time_sliced_metrics.parquet",
+      "path": "results/classical_risk/mcs_asset_level_time_sliced_metrics.parquet",
       "format": "parquet",
-      "row_granularity": "asset_x_slice_type_x_slice_value_x_confidence_x_horizon_x_window"
+      "row_granularity": "asset_x_method_x_slice_type_x_slice_value_x_confidence_x_horizon_x_window"
     },
 
-    "monte_carlo_results_scheme.json": {
-      "path": "results/classical_risk/monte_carlo_asset_level_results_scheme.json",
+    "mcs_results_scheme.json": {
+      "path": "results/classical_risk/mcs_asset_level_results_scheme.json",
       "format": "json",
       "contents": "the scheme of the results, all the .parquet files"
     },
 
     "report": {
-      "path": "results/classical_risk/monte_carlo_asset_level_report.md",
+      "path": "results/classical_risk/mcs_asset_level_report.md",
       "include_sections": [
         "methodology_overview",
-        "distributional_assumptions",
-        "parameter_estimation",
-        "monte_carlo_simulation_design",
+        "monte_carlo_methods_and_assumptions",
+        "rolling_forecast_construction",
+        "path_simulation_for_multi_horizon",
         "var_cvar_construction",
         "backtesting_results",
         "time_sliced_backtesting",
@@ -303,7 +385,7 @@
   },
 
   "paper_usage_notes": {
-    "simulation_phase": "Use this configuration for large-scale asset-level Monte Carlo evaluation across the full historical sample, multiple estimation windows, confidence levels, and horizons. This produces statistically coherent Monte Carlo VaR/CVaR backtests without portfolio aggregation confounds.",
-    "paper_phase": "For paper figures/tables: select representative assets and stress subperiods; report both full-period metrics and time-sliced metrics (year/quarter/month). Explicitly compare Monte Carlo coverage and tail loss metrics against GARCH and EVT results."
+    "simulation_phase": "Use this configuration for large-scale asset-level evaluation across historical bootstrap vs parametric simulation (Normal, Student-t) and optional filtered simulation. Report method-wise differences in coverage tests and tail exceedance behavior, highlighting when parametric assumptions under/over-estimate extreme losses.",
+    "paper_phase": "For figures/tables: show (i) VaR/CVaR time series for representative assets, (ii) coverage + independence tests by method and confidence, (iii) time-sliced performance during stress regimes, and (iv) runtime scaling with number of simulations."
   }
 }

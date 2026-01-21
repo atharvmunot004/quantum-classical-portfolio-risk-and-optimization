@@ -1,669 +1,616 @@
 """
-Monte Carlo Simulation for VaR and CVaR calculation module.
+Monte Carlo simulation methods for VaR/CVaR calculation.
 
-Implements efficient, memory-safe rolling VaR and CVaR calculation using:
-- Vectorized batch portfolio projection (single BLAS matmul)
-- Efficient VaR/CVaR computation using np.partition (no full sorts)
-- Float32 for simulations/projections, float64 for outputs
-- Asset-level simulation with portfolio projection for efficiency
+Implements multiple simulation methods per llm.json spec:
+- Historical bootstrap (iid or block)
+- Parametric normal
+- Parametric Student-t
+- Filtered EWMA bootstrap (optional)
 """
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy import stats
-from typing import Union, Optional, List, Tuple, Dict
+from scipy.optimize import minimize_scalar
+from typing import Dict, Optional, Tuple
 import warnings
-from sklearn.covariance import LedoitWolf
+
+warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 
-def estimate_asset_return_distribution(
-    returns_window: pd.DataFrame,
-    mean_model: Dict,
-    covariance_model: Dict
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Estimate asset return distribution parameters (mean and covariance).
-    
-    Args:
-        returns_window: DataFrame of historical returns (window size x num assets)
-        mean_model: Dictionary with 'enabled' and 'estimator' keys
-        covariance_model: Dictionary with 'estimator' and optional 'shrinkage' keys
-        
-    Returns:
-        Tuple of (mean_returns, covariance_matrix) as numpy arrays
-    """
-    returns_array = returns_window.values  # (window_size, num_assets)
-    
-    # Estimate mean
-    if mean_model.get('enabled', True):
-        if mean_model.get('estimator') == 'sample_mean':
-            mean_returns = returns_array.mean(axis=0)
-        else:
-            mean_returns = returns_array.mean(axis=0)
-    else:
-        mean_returns = np.zeros(returns_array.shape[1])
-    
-    # Estimate covariance
-    if covariance_model.get('estimator') == 'sample_covariance':
-        shrinkage = covariance_model.get('shrinkage', {})
-        if shrinkage.get('enabled', False) and shrinkage.get('method') == 'ledoit_wolf':
-            # Use Ledoit-Wolf shrinkage estimator
-            lw = LedoitWolf()
-            cov_matrix = lw.fit(returns_array).covariance_
-        else:
-            # Sample covariance
-            cov_matrix = np.cov(returns_array.T)
-        
-        # Ensure covariance matrix is positive semi-definite
-        cov_matrix = (cov_matrix + cov_matrix.T) / 2
-        
-        # Add small regularization to avoid singular matrix issues
-        cov_matrix = cov_matrix + np.eye(cov_matrix.shape[0]) * 1e-8
-    else:
-        # Default to sample covariance
-        cov_matrix = np.cov(returns_array.T)
-        cov_matrix = (cov_matrix + cov_matrix.T) / 2
-        cov_matrix = cov_matrix + np.eye(cov_matrix.shape[0]) * 1e-8
-    
-    return mean_returns, cov_matrix
-
-
-def simulate_asset_return_scenarios(
-    mean_returns: np.ndarray,
-    covariance_matrix: np.ndarray,
-    num_simulations: int = 10000,
-    horizon: int = 1,
-    distribution_type: str = 'multivariate_normal',
-    random_seed: Optional[int] = None,
-    dtype: np.dtype = np.float32
-) -> np.ndarray:
-    """
-    Simulate asset return scenarios for Monte Carlo simulation.
-    
-    Uses float32 by default to halve memory footprint.
-    
-    Args:
-        mean_returns: Array of mean returns for each asset (num_assets,)
-        covariance_matrix: Covariance matrix (num_assets x num_assets)
-        num_simulations: Number of Monte Carlo simulations
-        horizon: Time horizon in days (always 1 for pre-scaled covariance)
-        distribution_type: Distribution assumption ('multivariate_normal')
-        random_seed: Random seed for reproducibility
-        dtype: Data type for scenarios (default: float32)
-        
-    Returns:
-        Array of simulated asset returns (num_simulations, num_assets) as float32
-    """
-    if random_seed is not None:
-        np.random.seed(random_seed)
-    
-    if distribution_type == 'multivariate_normal':
-        # Check for singular matrix
+def fit_student_t_df(returns: np.ndarray, bounds: Tuple[float, float] = (2.1, 50.0)) -> float:
+    """Fit Student-t degrees of freedom using MLE."""
+    def neg_log_likelihood(df):
         try:
-            # Simulate asset returns - single period (covariance already scaled for multi-period)
-            simulated_asset_returns = np.random.multivariate_normal(
-                mean_returns,
-                covariance_matrix,
-                size=num_simulations
-            ).astype(dtype)
-        except np.linalg.LinAlgError:
-            # If matrix is singular, use diagonal approximation
-            cov_matrix = np.diag(np.diag(covariance_matrix))
-            simulated_asset_returns = np.random.multivariate_normal(
-                mean_returns,
-                cov_matrix,
-                size=num_simulations
-            ).astype(dtype)
-    else:
-        raise ValueError(f"Unsupported distribution type: {distribution_type}")
+            return -np.sum(stats.t.logpdf(returns, df=df, loc=returns.mean(), scale=returns.std()))
+        except:
+            return np.inf
     
-    return simulated_asset_returns
+    result = minimize_scalar(neg_log_likelihood, bounds=bounds, method='bounded')
+    if result.success:
+        return max(bounds[0], min(bounds[1], result.x))
+    return bounds[0] + (bounds[1] - bounds[0]) / 2
 
 
-def project_portfolio_returns_batch(
-    asset_return_scenarios: np.ndarray,
-    portfolio_weights_batch: np.ndarray
-) -> np.ndarray:
-    """
-    Project portfolio returns for a batch of portfolios using vectorized BLAS matmul.
-    
-    Formula: R_batch = W_batch @ R_assets.T
-    where:
-    - R_assets: (num_simulations, num_assets) - asset return scenarios
-    - W_batch: (batch_size, num_assets) - portfolio weights for batch
-    - R_batch: (batch_size, num_simulations) - portfolio return scenarios
-    
-    This is a single vectorized operation, avoiding Python loops.
-    
-    Args:
-        asset_return_scenarios: Array of simulated asset returns (num_simulations, num_assets)
-        portfolio_weights_batch: Array of portfolio weights (batch_size, num_assets)
-        
-    Returns:
-        Array of simulated portfolio returns (batch_size, num_simulations) as float32
-    """
-    # Single BLAS matmul: R_batch = W_batch @ R_assets.T
-    # This is the vectorized operation - no loops!
-    portfolio_returns_batch = np.dot(portfolio_weights_batch, asset_return_scenarios.T)
-    
-    return portfolio_returns_batch
-
-
-def compute_var_cvar_from_simulations_efficient(
-    simulated_returns: np.ndarray,
-    confidence_level: float = 0.95
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute VaR and CVaR from simulated returns using efficient np.partition.
-    
-    Uses np.partition instead of full sort to avoid O(n log n) complexity.
-    Only partitions to find the quantile index, then computes CVaR from tail.
-    
-    Args:
-        simulated_returns: Array of simulated portfolio returns
-            Shape: (num_portfolios, num_simulations) for batch
-            Shape: (num_simulations,) for single portfolio
-        confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
-        
-    Returns:
-        Tuple of (VaR, CVaR) arrays
-        - For batch: (num_portfolios,) arrays
-        - For single: scalar values
-    """
-    # Handle both single portfolio and batch cases
-    is_batch = simulated_returns.ndim == 2
-    if not is_batch:
-        simulated_returns = simulated_returns.reshape(1, -1)
-    
-    num_portfolios, num_simulations = simulated_returns.shape
-    alpha = 1 - confidence_level
-    
-    # Calculate quantile index
-    var_index = int(np.floor(alpha * num_simulations))
-    var_index = max(0, min(var_index, num_simulations - 1))
-    
-    # Use np.partition to find VaR without full sort
-    # Partition to put the var_index-th smallest element in the correct position
-    partitioned = np.partition(simulated_returns, var_index, axis=1)
-    var_values = -partitioned[:, var_index]  # VaR is positive (loss amount)
-    
-    # Compute CVaR: mean of returns in the tail (worst alpha% of outcomes)
-    # Select tail returns without full sort
-    tail_indices = np.argpartition(simulated_returns, var_index, axis=1)[:, :var_index + 1]
-    
-    # Get tail returns efficiently
-    batch_indices = np.arange(num_portfolios)[:, None]
-    tail_returns = simulated_returns[batch_indices, tail_indices]
-    cvar_values = -tail_returns.mean(axis=1)  # CVaR is positive (loss amount)
-    
-    if not is_batch:
-        return var_values[0], cvar_values[0]
-    
-    return var_values, cvar_values
-
-
-def project_portfolio_returns(
-    asset_return_scenarios: np.ndarray,
-    portfolio_weights: np.ndarray,
-    horizon: int = 1
-) -> np.ndarray:
-    """
-    Project portfolio returns from asset return scenarios using linear projection.
-    
-    Formula: R_p = W^T R_assets
-    
-    Args:
-        asset_return_scenarios: Array of simulated asset returns
-            Shape: (num_simulations, num_assets) for single-period or pre-scaled multi-period
-        portfolio_weights: Array of portfolio weights (num_assets,)
-        horizon: Time horizon in days (for reference, but scenarios may already be scaled)
-        
-    Returns:
-        Array of simulated portfolio returns (num_simulations,)
-    """
-    # Check the shape to determine if we need to aggregate over horizon
-    if asset_return_scenarios.ndim == 3:
-        # Shape: (num_simulations, horizon, num_assets)
-        # Sum over horizon: (num_simulations, num_assets)
-        asset_returns_aggregated = asset_return_scenarios.sum(axis=1)
-        portfolio_returns = np.dot(asset_returns_aggregated, portfolio_weights)
-    elif asset_return_scenarios.ndim == 2:
-        # Shape: (num_simulations, num_assets) - single period or pre-scaled multi-period
-        portfolio_returns = np.dot(asset_return_scenarios, portfolio_weights)
-    else:
-        raise ValueError(f"Unexpected asset_return_scenarios shape: {asset_return_scenarios.shape}")
-    
-    return portfolio_returns
-
-
-def simulate_portfolio_returns(
-    returns_window: pd.DataFrame,
-    portfolio_weights: np.ndarray,
-    num_simulations: int = 10000,
-    horizon: int = 1,
-    distribution_type: str = 'multivariate_normal',
+def simulate_historical_bootstrap(
+    returns_window: np.ndarray,
+    num_simulations: int,
+    horizon: int,
+    bootstrap_type: str = 'iid',
+    block_length: Optional[int] = None,
     random_seed: Optional[int] = None
 ) -> np.ndarray:
     """
-    Simulate portfolio returns using Monte Carlo method.
+    Simulate returns using historical bootstrap.
     
     Args:
-        returns_window: DataFrame of historical returns (window size x num assets)
-        portfolio_weights: Array of portfolio weights
-        num_simulations: Number of Monte Carlo simulations
-        horizon: Time horizon in days
-        distribution_type: Distribution assumption ('multivariate_normal')
-        random_seed: Random seed for reproducibility
+        returns_window: Historical returns array (window_size,)
+        num_simulations: Number of simulations
+        horizon: Time horizon (simulate path and aggregate)
+        bootstrap_type: 'iid' or 'block'
+        block_length: Block length for block bootstrap
+        random_seed: Random seed
         
     Returns:
-        Array of simulated portfolio returns (num_simulations,)
+        Simulated horizon returns (num_simulations,)
     """
     if random_seed is not None:
         np.random.seed(random_seed)
     
-    # Align assets
-    returns_array = returns_window.values  # (window_size, num_assets)
+    n = len(returns_window)
+    if n == 0:
+        return np.full(num_simulations, np.nan)
     
-    if distribution_type == 'multivariate_normal':
-        # Estimate mean and covariance from historical returns
-        mean_returns = returns_array.mean(axis=0)
-        cov_matrix = np.cov(returns_array.T)
-        
-        # Ensure covariance matrix is positive semi-definite
-        cov_matrix = (cov_matrix + cov_matrix.T) / 2
-        
-        # Add small regularization to avoid singular matrix issues
-        cov_matrix = cov_matrix + np.eye(cov_matrix.shape[0]) * 1e-8
-        
-        # Check for singular matrix
-        try:
-            # Simulate asset returns
-            simulated_asset_returns = np.random.multivariate_normal(
-                mean_returns,
-                cov_matrix,
-                size=(num_simulations, horizon)
-            )
-        except np.linalg.LinAlgError:
-            # If matrix is still singular, use diagonal approximation
-            cov_matrix = np.diag(np.diag(cov_matrix))
-            simulated_asset_returns = np.random.multivariate_normal(
-                mean_returns,
-                cov_matrix,
-                size=(num_simulations, horizon)
-            )
-        
-        # If horizon > 1, sum returns over horizon
-        if horizon > 1:
-            simulated_asset_returns = simulated_asset_returns.sum(axis=1)
+    if horizon == 1:
+        if bootstrap_type == 'block' and block_length is not None:
+            # Block bootstrap
+            num_blocks = (n + block_length - 1) // block_length
+            simulated = []
+            for _ in range(num_simulations):
+                block_idx = np.random.randint(0, num_blocks)
+                start_idx = block_idx * block_length
+                end_idx = min(start_idx + block_length, n)
+                if start_idx < n:
+                    simulated.append(returns_window[start_idx:end_idx])
+            return np.concatenate(simulated)[:num_simulations]
         else:
-            simulated_asset_returns = simulated_asset_returns.squeeze()
-        
-        # Compute portfolio returns: weighted sum
-        portfolio_returns = np.dot(simulated_asset_returns, portfolio_weights)
-        
+            # IID bootstrap
+            return np.random.choice(returns_window, size=num_simulations)
     else:
-        raise ValueError(f"Unsupported distribution type: {distribution_type}")
-    
-    return portfolio_returns
+        # Vectorized path simulation: simulate daily returns and sum
+        if bootstrap_type == 'block' and block_length is not None:
+            # Block bootstrap for path - partially vectorized
+            num_blocks = (n + block_length - 1) // block_length
+            # Generate block indices for all simulations and horizons
+            block_indices = np.random.randint(0, num_blocks, size=(num_simulations, horizon))
+            # Generate positions within blocks
+            positions = np.random.randint(0, block_length, size=(num_simulations, horizon))
+            
+            path_returns = np.zeros((num_simulations, horizon))
+            for sim_idx in range(num_simulations):
+                for h_idx in range(horizon):
+                    block_idx = block_indices[sim_idx, h_idx]
+                    start_idx = block_idx * block_length
+                    end_idx = min(start_idx + block_length, n)
+                    if start_idx < n:
+                        pos = min(positions[sim_idx, h_idx], end_idx - start_idx - 1)
+                        actual_idx = start_idx + pos
+                        if actual_idx < n:
+                            path_returns[sim_idx, h_idx] = returns_window[actual_idx]
+            return path_returns.sum(axis=1)
+        else:
+            # Fully vectorized IID bootstrap for path
+            # Generate random indices for all simulations and horizons at once
+            indices = np.random.randint(0, n, size=(num_simulations, horizon))
+            path_returns = returns_window[indices]
+            return path_returns.sum(axis=1)
 
 
-def compute_var_cvar_from_simulations(
-    simulated_returns: np.ndarray,
-    confidence_level: float = 0.95
-) -> Tuple[float, float]:
-    """
-    Compute VaR and CVaR from simulated returns (legacy single-portfolio version).
-    
-    Args:
-        simulated_returns: Array of simulated portfolio returns
-        confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
-        
-    Returns:
-        Tuple of (VaR, CVaR)
-    """
-    # Sort returns (ascending order - losses are negative)
-    sorted_returns = np.sort(simulated_returns)
-    
-    # Calculate VaR (Value at Risk) - quantile of losses
-    alpha = 1 - confidence_level
-    var_index = int(np.floor(alpha * len(sorted_returns)))
-    var_index = max(0, min(var_index, len(sorted_returns) - 1))
-    
-    var = -sorted_returns[var_index]  # VaR is positive (loss amount)
-    
-    # Calculate CVaR (Conditional Value at Risk) - expected loss beyond VaR
-    # CVaR is the mean of returns in the tail (worst alpha% of outcomes)
-    tail_returns = sorted_returns[:var_index + 1]
-    cvar = -tail_returns.mean() if len(tail_returns) > 0 else var
-    
-    return var, cvar
-
-
-def scale_horizon_covariance(
-    covariance_matrix: np.ndarray,
+def simulate_parametric_normal(
+    returns_window: np.ndarray,
+    num_simulations: int,
     horizon: int,
-    scaling_rule: str = 'sqrt_time'
+    random_seed: Optional[int] = None
+) -> np.ndarray:
+    """Simulate returns using parametric normal distribution."""
+    if random_seed is not None:
+        np.random.seed(random_seed)
+    
+    mu = returns_window.mean()
+    sigma = returns_window.std()
+    
+    if sigma <= 0 or not np.isfinite(sigma):
+        return np.full(num_simulations, np.nan)
+    
+    if horizon == 1:
+        return np.random.normal(mu, sigma, size=num_simulations)
+    else:
+        # Path simulation: simulate daily returns and sum
+        daily_returns = np.random.normal(mu, sigma, size=(num_simulations, horizon))
+        return daily_returns.sum(axis=1)
+
+
+def simulate_parametric_student_t(
+    returns_window: np.ndarray,
+    num_simulations: int,
+    horizon: int,
+    df: Optional[float] = None,
+    df_mode: str = 'mle_or_fixed',
+    fixed_df: float = 5.0,
+    bounds: Tuple[float, float] = (2.1, 50.0),
+    fallback_df: float = 5.0,
+    random_seed: Optional[int] = None
+) -> Tuple[np.ndarray, float]:
+    """
+    Simulate returns using parametric Student-t distribution.
+    
+    Returns:
+        Tuple of (simulated_returns, fitted_df)
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+    
+    mu = returns_window.mean()
+    sigma = returns_window.std()
+    
+    if sigma <= 0 or not np.isfinite(sigma):
+        return np.full(num_simulations, np.nan), fallback_df
+    
+    # Fit degrees of freedom (can be pre-computed and passed via df parameter)
+    if df is None:
+        if df_mode == 'mle_or_fixed':
+            try:
+                df = fit_student_t_df(returns_window, bounds)
+            except:
+                df = fixed_df
+        else:
+            df = fixed_df
+    
+    df = max(bounds[0], min(bounds[1], df))
+    
+    # Scale parameter for Student-t
+    scale = sigma * np.sqrt((df - 2) / df) if df > 2 else sigma
+    
+    if horizon == 1:
+        simulated = stats.t.rvs(df=df, loc=mu, scale=scale, size=num_simulations)
+    else:
+        # Vectorized path simulation
+        daily_returns = stats.t.rvs(df=df, loc=mu, scale=scale, size=(num_simulations, horizon))
+        simulated = daily_returns.sum(axis=1)
+    
+    return simulated, df
+
+
+def simulate_filtered_ewma_bootstrap(
+    returns_window: np.ndarray,
+    num_simulations: int,
+    horizon: int,
+    lambda_param: float = 0.94,
+    min_variance_floor: float = 1e-12,
+    bootstrap_type: str = 'iid',
+    block_length: Optional[int] = None,
+    mu_rule: str = 'zero_or_sample_mean',
+    random_seed: Optional[int] = None
 ) -> np.ndarray:
     """
-    Scale covariance matrix for multi-period horizon.
+    Simulate returns using filtered EWMA bootstrap.
     
-    Args:
-        covariance_matrix: Single-period covariance matrix
-        horizon: Time horizon in days
-        scaling_rule: Scaling rule ('sqrt_time' for sqrt(T) scaling)
-        
-    Returns:
-        Scaled covariance matrix
+    Computes standardized residuals, resamples them, then reconstructs returns
+    using EWMA volatility forecast.
     """
-    if scaling_rule == 'sqrt_time':
-        # Scale by sqrt(T) for returns: Var(h*R) = h * Var(R) for h-day returns
-        # But for multi-period: if daily returns have cov Σ, then h-day returns have cov h*Σ
-        # VaR scales as sqrt(h) * σ for normal returns
-        return covariance_matrix * horizon
+    if random_seed is not None:
+        np.random.seed(random_seed)
+    
+    n = len(returns_window)
+    if n == 0:
+        return np.full(num_simulations, np.nan)
+    
+    # Compute EWMA volatility
+    sigma_sq = np.zeros(n)
+    sigma_sq[0] = returns_window[0] ** 2
+    
+    for i in range(1, n):
+        sigma_sq[i] = lambda_param * sigma_sq[i-1] + (1 - lambda_param) * returns_window[i-1]**2
+    
+    sigma = np.sqrt(np.maximum(sigma_sq, min_variance_floor))
+    
+    # Compute standardized residuals
+    mu = returns_window.mean() if mu_rule == 'zero_or_sample_mean' else 0.0
+    standardized_residuals = (returns_window - mu) / (sigma + 1e-10)
+    
+    # Forecast next period volatility
+    next_sigma_sq = lambda_param * sigma_sq[-1] + (1 - lambda_param) * returns_window[-1]**2
+    next_sigma = np.sqrt(max(next_sigma_sq, min_variance_floor))
+    
+    if horizon == 1:
+        # Resample standardized residuals
+        if bootstrap_type == 'block' and block_length is not None:
+            num_blocks = (n + block_length - 1) // block_length
+            resampled_residuals = []
+            for _ in range(num_simulations):
+                block_idx = np.random.randint(0, num_blocks)
+                start_idx = block_idx * block_length
+                end_idx = min(start_idx + block_length, n)
+                if start_idx < n:
+                    idx = np.random.randint(start_idx, end_idx)
+                    resampled_residuals.append(standardized_residuals[idx])
+            resampled_residuals = np.array(resampled_residuals[:num_simulations])
+        else:
+            resampled_residuals = np.random.choice(standardized_residuals, size=num_simulations)
+        
+        # Reconstruct returns
+        return mu + next_sigma * resampled_residuals
     else:
-        return covariance_matrix
+        # Vectorized path simulation: simulate daily returns and sum
+        current_sigma_sq = sigma_sq[-1]
+        
+        # Resample residuals for all paths and horizons
+        if bootstrap_type == 'block' and block_length is not None:
+            num_blocks = (n + block_length - 1) // block_length
+            # Generate block indices
+            block_indices = np.random.randint(0, num_blocks, size=(num_simulations, horizon))
+            positions = np.random.randint(0, block_length, size=(num_simulations, horizon))
+            
+            residuals = np.zeros((num_simulations, horizon))
+            for sim_idx in range(num_simulations):
+                for h_idx in range(horizon):
+                    block_idx = block_indices[sim_idx, h_idx]
+                    start_idx = block_idx * block_length
+                    end_idx = min(start_idx + block_length, n)
+                    if start_idx < n:
+                        pos = min(positions[sim_idx, h_idx], end_idx - start_idx - 1)
+                        actual_idx = start_idx + pos
+                        if actual_idx < n:
+                            residuals[sim_idx, h_idx] = standardized_residuals[actual_idx]
+        else:
+            # Fully vectorized IID bootstrap
+            residual_indices = np.random.randint(0, n, size=(num_simulations, horizon))
+            residuals = standardized_residuals[residual_indices]
+        
+        # Simulate paths with EWMA volatility updating
+        path_returns = np.zeros((num_simulations, horizon))
+        path_sigma_sq = np.full(num_simulations, current_sigma_sq)
+        
+        for h_idx in range(horizon):
+            path_sigma = np.sqrt(np.maximum(path_sigma_sq, min_variance_floor))
+            path_returns[:, h_idx] = mu + path_sigma * residuals[:, h_idx]
+            # Update sigma for next period
+            path_sigma_sq = lambda_param * path_sigma_sq + (1 - lambda_param) * path_returns[:, h_idx]**2
+        
+        return path_returns.sum(axis=1)
 
 
-def compute_rolling_var(
-    returns: pd.DataFrame,
-    portfolio_weights: pd.Series,
-    window: int = 252,
-    confidence_level: float = 0.95,
-    horizon: int = 1,
-    num_simulations: int = 10000,
-    distribution_type: str = 'multivariate_normal',
+def compute_var_cvar(
+    simulated_returns: np.ndarray,
+    confidence_level: float,
+    tail_side: str = 'left'
+) -> Tuple[float, float]:
+    """
+    Compute VaR and CVaR from simulated returns.
+    
+    Args:
+        simulated_returns: Simulated returns array
+        confidence_level: Confidence level (e.g., 0.95)
+        tail_side: 'left' for left-tail risk
+        
+    Returns:
+        Tuple of (VaR, CVaR) as positive loss numbers
+    """
+    if len(simulated_returns) == 0 or not np.any(np.isfinite(simulated_returns)):
+        return np.nan, np.nan
+    
+    # Convert returns to losses: loss = -return
+    losses = -simulated_returns
+    
+    # Compute VaR (quantile of loss distribution)
+    # For left-tail risk at confidence_level (e.g., 0.95), we want the worst (1-confidence_level) outcomes
+    # This means: "95% of the time, losses will be <= VaR"
+    # So VaR is the confidence_level quantile (e.g., 95th percentile) of the loss distribution
+    quantile_level = confidence_level  # e.g., 0.95 for 95% confidence
+    var_idx = int(np.floor(quantile_level * len(losses)))
+    var_idx = max(0, min(var_idx, len(losses) - 1))
+    
+    # Use partition for efficiency - partition at the quantile index
+    partitioned = np.partition(losses, var_idx)
+    var = partitioned[var_idx]
+    
+    # Ensure VaR is positive (representing a loss)
+    # If var is negative, it means the quantile falls in the negative loss region (gains)
+    # In this case, VaR should be the maximum positive loss, or 0 if all losses are negative
+    if var < 0:
+        positive_losses = losses[losses > 0]
+        if len(positive_losses) > 0:
+            # Use the maximum positive loss as VaR
+            var = positive_losses.max()
+        else:
+            # All outcomes are gains, VaR should be 0
+            var = 0.0
+    
+    # Compute CVaR: mean of losses exceeding VaR (tail losses)
+    tail_losses = losses[losses >= var]
+    cvar = tail_losses.mean() if len(tail_losses) > 0 else var
+    
+    # Ensure CVaR >= VaR and both are non-negative
+    if cvar < var:
+        cvar = var
+    
+    # Final check: both should be non-negative
+    var = max(0.0, var)
+    cvar = max(var, cvar)
+    
+    return float(var), float(cvar)
+
+
+def simulate_returns_paths(
+    returns_window: np.ndarray,
+    method: str,
+    method_config: Dict,
+    num_simulations: int,
+    max_horizon: int,
     random_seed: Optional[int] = None,
-    min_periods: Optional[int] = None,
-    mean_model: Optional[Dict] = None,
-    covariance_model: Optional[Dict] = None,
-    scaling_rule: str = 'sqrt_time',
-    asset_scenarios: Optional[Dict] = None
-) -> pd.Series:
+    cached_df: Optional[float] = None
+) -> Tuple[np.ndarray, Dict]:
     """
-    Compute rolling VaR using Monte Carlo simulation.
+    Simulate daily return paths up to max_horizon using specified method.
     
-    Supports asset-level simulation with portfolio projection, or legacy per-portfolio simulation.
+    This function simulates paths once and returns the full path array,
+    which can then be sliced for different horizons.
     
     Args:
-        returns: DataFrame of asset returns with dates as index
-        portfolio_weights: Series of portfolio weights with assets as index
-        window: Rolling window size in days
-        confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
-        horizon: Time horizon in days
-        num_simulations: Number of Monte Carlo simulations
-        distribution_type: Distribution assumption
-        random_seed: Random seed for reproducibility
-        min_periods: Minimum number of periods required for calculation
-        mean_model: Optional dict with mean estimation settings
-        covariance_model: Optional dict with covariance estimation settings
-        scaling_rule: Scaling rule for multi-period horizon ('sqrt_time')
-        asset_scenarios: Optional dict mapping (window_start_idx, window_end_idx) to pre-computed asset scenarios
+        returns_window: Historical returns array
+        method: Method name ('historical_bootstrap', 'parametric_normal', etc.)
+        method_config: Method-specific configuration
+        num_simulations: Number of simulations
+        max_horizon: Maximum time horizon (simulates paths up to this)
+        random_seed: Random seed
+        cached_df: Cached Student-t degrees of freedom (for parametric_student_t)
         
     Returns:
-        Series of rolling VaR values with dates as index
+        Tuple of (simulated_paths (num_simulations, max_horizon), fitted_params_dict)
     """
-    if min_periods is None:
-        min_periods = min(window, len(returns))
+    fitted_params = {}
     
-    # Set default models if not provided
-    if mean_model is None:
-        mean_model = {'enabled': True, 'estimator': 'sample_mean'}
-    if covariance_model is None:
-        covariance_model = {'estimator': 'sample_covariance', 'shrinkage': {'enabled': False}}
-    
-    # Align assets
-    common_assets = returns.columns.intersection(portfolio_weights.index)
-    if len(common_assets) == 0:
-        raise ValueError("No common assets between returns and weights")
-    
-    returns_aligned = returns[common_assets]
-    weights_aligned = portfolio_weights[common_assets].values
-    weights_aligned = weights_aligned / weights_aligned.sum()  # Normalize
-    
-    # Compute rolling VaR
-    rolling_var = pd.Series(index=returns.index, dtype=float)
-    
-    for i in range(len(returns_aligned)):
-        if i < min_periods - 1:
-            rolling_var.iloc[i] = np.nan
-            continue
+    if method == 'historical_bootstrap':
+        bootstrap_type = method_config.get('bootstrap_type', 'iid')
+        block_bootstrap = method_config.get('block_bootstrap', {})
+        block_length = block_bootstrap.get('block_length') if block_bootstrap.get('enabled') else None
         
-        # Get window of returns
-        start_idx = max(0, i - window + 1)
-        window_returns = returns_aligned.iloc[start_idx:i+1]
+        n = len(returns_window)
+        if n == 0:
+            return np.full((num_simulations, max_horizon), np.nan), {}
         
-        if len(window_returns) < min_periods:
-            rolling_var.iloc[i] = np.nan
-            continue
+        if random_seed is not None:
+            np.random.seed(random_seed)
         
-        try:
-            # Check if we have pre-computed asset scenarios
-            window_key = (start_idx, i)
-            if asset_scenarios is not None and window_key in asset_scenarios:
-                asset_return_scenarios = asset_scenarios[window_key]
-                # Project portfolio returns from asset scenarios
-                simulated_returns = project_portfolio_returns(
-                    asset_return_scenarios,
-                    weights_aligned,
-                    horizon=horizon
-                )
+        if bootstrap_type == 'block' and block_length is not None:
+            num_blocks = (n + block_length - 1) // block_length
+            block_indices = np.random.randint(0, num_blocks, size=(num_simulations, max_horizon))
+            positions = np.random.randint(0, block_length, size=(num_simulations, max_horizon))
+            
+            paths = np.zeros((num_simulations, max_horizon))
+            for sim_idx in range(num_simulations):
+                for h_idx in range(max_horizon):
+                    block_idx = block_indices[sim_idx, h_idx]
+                    start_idx = block_idx * block_length
+                    end_idx = min(start_idx + block_length, n)
+                    if start_idx < n:
+                        pos = min(positions[sim_idx, h_idx], end_idx - start_idx - 1)
+                        actual_idx = start_idx + pos
+                        if actual_idx < n:
+                            paths[sim_idx, h_idx] = returns_window[actual_idx]
+        else:
+            # Fully vectorized IID bootstrap
+            indices = np.random.randint(0, n, size=(num_simulations, max_horizon))
+            paths = returns_window[indices]
+        
+        return paths, {}
+        
+    elif method == 'parametric_normal':
+        if random_seed is not None:
+            np.random.seed(random_seed)
+        
+        mu = returns_window.mean()
+        sigma = returns_window.std()
+        
+        if sigma <= 0 or not np.isfinite(sigma):
+            return np.full((num_simulations, max_horizon), np.nan), {}
+        
+        paths = np.random.normal(mu, sigma, size=(num_simulations, max_horizon))
+        fitted_params['window_mu'] = mu
+        fitted_params['window_sigma'] = sigma
+        
+        return paths, fitted_params
+        
+    elif method == 'parametric_student_t':
+        if random_seed is not None:
+            np.random.seed(random_seed)
+        
+        mu = returns_window.mean()
+        sigma = returns_window.std()
+        
+        if sigma <= 0 or not np.isfinite(sigma):
+            df_config = method_config.get('fit', {}).get('df', {})
+            fallback_df = df_config.get('fallback_df', 5.0)
+            return np.full((num_simulations, max_horizon), np.nan), {'student_t_df': fallback_df}
+        
+        # Use cached df if provided, otherwise fit
+        if cached_df is not None:
+            df = cached_df
+        else:
+            df_config = method_config.get('fit', {}).get('df', {})
+            df_mode = df_config.get('mode', 'mle_or_fixed')
+            fixed_df = df_config.get('fixed_df', 5.0)
+            bounds = tuple(df_config.get('bounds', [2.1, 50.0]))
+            
+            if df_mode == 'mle_or_fixed':
+                try:
+                    df = fit_student_t_df(returns_window, bounds)
+                except:
+                    df = fixed_df
             else:
-                # Use asset-level simulation
-                # Estimate distribution
-                mean_returns, cov_matrix = estimate_asset_return_distribution(
-                    window_returns,
-                    mean_model,
-                    covariance_model
-                )
-                
-                # Scale covariance for horizon
-                if horizon > 1:
-                    cov_matrix = scale_horizon_covariance(cov_matrix, horizon, scaling_rule)
-                
-                # Simulate asset returns
-                asset_return_scenarios = simulate_asset_return_scenarios(
-                    mean_returns,
-                    cov_matrix,
-                    num_simulations=num_simulations,
-                    horizon=1 if horizon > 1 else horizon,  # Already scaled covariance
-                    distribution_type=distribution_type,
-                    random_seed=random_seed
-                )
-                
-                # Project portfolio returns
-                simulated_returns = project_portfolio_returns(
-                    asset_return_scenarios,
-                    weights_aligned,
-                    horizon=horizon
-                )
+                df = fixed_df
+        
+        bounds = tuple(method_config.get('fit', {}).get('df', {}).get('bounds', [2.1, 50.0]))
+        df = max(bounds[0], min(bounds[1], df))
+        
+        scale = sigma * np.sqrt((df - 2) / df) if df > 2 else sigma
+        
+        paths = stats.t.rvs(df=df, loc=mu, scale=scale, size=(num_simulations, max_horizon))
+        fitted_params['window_mu'] = mu
+        fitted_params['window_sigma'] = sigma
+        fitted_params['student_t_df'] = df
+        
+        return paths, fitted_params
+        
+    elif method == 'filtered_ewma_bootstrap':
+        if random_seed is not None:
+            np.random.seed(random_seed)
+        
+        n = len(returns_window)
+        if n == 0:
+            return np.full((num_simulations, max_horizon), np.nan), {}
+        
+        filter_config = method_config.get('filter', {})
+        lambda_param = filter_config.get('lambda', 0.94)
+        min_variance_floor = filter_config.get('min_variance_floor', 1e-12)
+        
+        # Compute EWMA volatility
+        sigma_sq = np.zeros(n)
+        sigma_sq[0] = returns_window[0] ** 2
+        for i in range(1, n):
+            sigma_sq[i] = lambda_param * sigma_sq[i-1] + (1 - lambda_param) * returns_window[i-1]**2
+        
+        sigma = np.sqrt(np.maximum(sigma_sq, min_variance_floor))
+        
+        # Compute standardized residuals
+        mu = returns_window.mean() if method_config.get('reconstruction', {}).get('mu_rule', 'zero_or_sample_mean') == 'zero_or_sample_mean' else 0.0
+        standardized_residuals = (returns_window - mu) / (sigma + 1e-10)
+        
+        current_sigma_sq = sigma_sq[-1]
+        
+        shock_config = method_config.get('shock_resampling', {})
+        bootstrap_type = shock_config.get('bootstrap_type', 'iid')
+        block_bootstrap = shock_config.get('block_bootstrap', {})
+        block_length = block_bootstrap.get('block_length') if block_bootstrap.get('enabled') else None
+        
+        # Resample residuals
+        if bootstrap_type == 'block' and block_length is not None:
+            num_blocks = (n + block_length - 1) // block_length
+            block_indices = np.random.randint(0, num_blocks, size=(num_simulations, max_horizon))
+            positions = np.random.randint(0, block_length, size=(num_simulations, max_horizon))
             
-            # Compute VaR from simulations
-            var, _ = compute_var_cvar_from_simulations(
-                simulated_returns,
-                confidence_level=confidence_level
-            )
-            
-            rolling_var.iloc[i] = var
-            
-        except Exception as e:
-            rolling_var.iloc[i] = np.nan
-    
-    return rolling_var
+            residuals = np.zeros((num_simulations, max_horizon))
+            for sim_idx in range(num_simulations):
+                for h_idx in range(max_horizon):
+                    block_idx = block_indices[sim_idx, h_idx]
+                    start_idx = block_idx * block_length
+                    end_idx = min(start_idx + block_length, n)
+                    if start_idx < n:
+                        pos = min(positions[sim_idx, h_idx], end_idx - start_idx - 1)
+                        actual_idx = start_idx + pos
+                        if actual_idx < n:
+                            residuals[sim_idx, h_idx] = standardized_residuals[actual_idx]
+        else:
+            residual_indices = np.random.randint(0, n, size=(num_simulations, max_horizon))
+            residuals = standardized_residuals[residual_indices]
+        
+        # Simulate paths with EWMA volatility updating
+        paths = np.zeros((num_simulations, max_horizon))
+        path_sigma_sq = np.full(num_simulations, current_sigma_sq)
+        
+        for h_idx in range(max_horizon):
+            path_sigma = np.sqrt(np.maximum(path_sigma_sq, min_variance_floor))
+            paths[:, h_idx] = mu + path_sigma * residuals[:, h_idx]
+            path_sigma_sq = lambda_param * path_sigma_sq + (1 - lambda_param) * paths[:, h_idx]**2
+        
+        fitted_params['ewma_lambda'] = lambda_param
+        return paths, fitted_params
+        
+    else:
+        raise ValueError(f"Unknown method: {method}")
 
 
-def compute_rolling_cvar(
-    returns: pd.DataFrame,
-    portfolio_weights: pd.Series,
-    window: int = 252,
-    confidence_level: float = 0.95,
-    horizon: int = 1,
-    num_simulations: int = 10000,
-    distribution_type: str = 'multivariate_normal',
+def simulate_returns(
+    returns_window: np.ndarray,
+    method: str,
+    method_config: Dict,
+    num_simulations: int,
+    horizon: int,
     random_seed: Optional[int] = None,
-    min_periods: Optional[int] = None,
-    mean_model: Optional[Dict] = None,
-    covariance_model: Optional[Dict] = None,
-    scaling_rule: str = 'sqrt_time',
-    asset_scenarios: Optional[Dict] = None
-) -> pd.Series:
+    cached_df: Optional[float] = None
+) -> Tuple[np.ndarray, Dict]:
     """
-    Compute rolling CVaR using Monte Carlo simulation.
-    
-    Supports asset-level simulation with portfolio projection, or legacy per-portfolio simulation.
+    Simulate returns using specified method.
     
     Args:
-        returns: DataFrame of asset returns with dates as index
-        portfolio_weights: Series of portfolio weights with assets as index
-        window: Rolling window size in days
-        confidence_level: Confidence level (e.g., 0.95 for 95% CVaR)
-        horizon: Time horizon in days
-        num_simulations: Number of Monte Carlo simulations
-        distribution_type: Distribution assumption
-        random_seed: Random seed for reproducibility
-        min_periods: Minimum number of periods required for calculation
-        mean_model: Optional dict with mean estimation settings
-        covariance_model: Optional dict with covariance estimation settings
-        scaling_rule: Scaling rule for multi-period horizon ('sqrt_time')
-        asset_scenarios: Optional dict mapping (window_start_idx, window_end_idx) to pre-computed asset scenarios
+        returns_window: Historical returns array
+        method: Method name ('historical_bootstrap', 'parametric_normal', etc.)
+        method_config: Method-specific configuration
+        num_simulations: Number of simulations
+        horizon: Time horizon
+        random_seed: Random seed
         
     Returns:
-        Series of rolling CVaR values with dates as index
+        Tuple of (simulated_returns, fitted_params_dict)
     """
-    if min_periods is None:
-        min_periods = min(window, len(returns))
+    fitted_params = {}
     
-    # Set default models if not provided
-    if mean_model is None:
-        mean_model = {'enabled': True, 'estimator': 'sample_mean'}
-    if covariance_model is None:
-        covariance_model = {'estimator': 'sample_covariance', 'shrinkage': {'enabled': False}}
-    
-    # Align assets
-    common_assets = returns.columns.intersection(portfolio_weights.index)
-    if len(common_assets) == 0:
-        raise ValueError("No common assets between returns and weights")
-    
-    returns_aligned = returns[common_assets]
-    weights_aligned = portfolio_weights[common_assets].values
-    weights_aligned = weights_aligned / weights_aligned.sum()  # Normalize
-    
-    # Compute rolling CVaR
-    rolling_cvar = pd.Series(index=returns.index, dtype=float)
-    
-    for i in range(len(returns_aligned)):
-        if i < min_periods - 1:
-            rolling_cvar.iloc[i] = np.nan
-            continue
+    if method == 'historical_bootstrap':
+        bootstrap_type = method_config.get('bootstrap_type', 'iid')
+        block_bootstrap = method_config.get('block_bootstrap', {})
+        block_length = block_bootstrap.get('block_length') if block_bootstrap.get('enabled') else None
         
-        # Get window of returns
-        start_idx = max(0, i - window + 1)
-        window_returns = returns_aligned.iloc[start_idx:i+1]
+        simulated = simulate_historical_bootstrap(
+            returns_window, num_simulations, horizon,
+            bootstrap_type, block_length, random_seed
+        )
         
-        if len(window_returns) < min_periods:
-            rolling_cvar.iloc[i] = np.nan
-            continue
+    elif method == 'parametric_normal':
+        simulated = simulate_parametric_normal(
+            returns_window, num_simulations, horizon, random_seed
+        )
+        fitted_params['window_mu'] = returns_window.mean()
+        fitted_params['window_sigma'] = returns_window.std()
         
-        try:
-            # Check if we have pre-computed asset scenarios
-            window_key = (start_idx, i)
-            if asset_scenarios is not None and window_key in asset_scenarios:
-                asset_return_scenarios = asset_scenarios[window_key]
-                # Project portfolio returns from asset scenarios
-                simulated_returns = project_portfolio_returns(
-                    asset_return_scenarios,
-                    weights_aligned,
-                    horizon=horizon
-                )
-            else:
-                # Use asset-level simulation
-                # Estimate distribution
-                mean_returns, cov_matrix = estimate_asset_return_distribution(
-                    window_returns,
-                    mean_model,
-                    covariance_model
-                )
-                
-                # Scale covariance for horizon
-                if horizon > 1:
-                    cov_matrix = scale_horizon_covariance(cov_matrix, horizon, scaling_rule)
-                
-                # Simulate asset returns
-                asset_return_scenarios = simulate_asset_return_scenarios(
-                    mean_returns,
-                    cov_matrix,
-                    num_simulations=num_simulations,
-                    horizon=1 if horizon > 1 else horizon,  # Already scaled covariance
-                    distribution_type=distribution_type,
-                    random_seed=random_seed
-                )
-                
-                # Project portfolio returns
-                simulated_returns = project_portfolio_returns(
-                    asset_return_scenarios,
-                    weights_aligned,
-                    horizon=horizon
-                )
-            
-            # Compute CVaR from simulations
-            _, cvar = compute_var_cvar_from_simulations(
-                simulated_returns,
-                confidence_level=confidence_level
-            )
-            
-            rolling_cvar.iloc[i] = cvar
-            
-        except Exception as e:
-            rolling_cvar.iloc[i] = np.nan
-    
-    return rolling_cvar
-
-
-def align_returns_and_var(
-    returns: pd.Series,
-    var_series: pd.Series
-) -> Tuple[pd.Series, pd.Series]:
-    """
-    Align returns and VaR series to common dates.
-    
-    Args:
-        returns: Series of returns with dates as index
-        var_series: Series of VaR values with dates as index
+    elif method == 'parametric_student_t':
+        df_config = method_config.get('fit', {}).get('df', {})
+        df_mode = df_config.get('mode', 'mle_or_fixed')
+        fixed_df = df_config.get('fixed_df', 5.0)
+        bounds = tuple(df_config.get('bounds', [2.1, 50.0]))
+        fallback_df = df_config.get('fallback_df', 5.0)
         
-    Returns:
-        Tuple of (aligned_returns, aligned_var)
-    """
-    # Find common dates
-    common_dates = returns.index.intersection(var_series.index)
-    
-    if len(common_dates) == 0:
-        raise ValueError("No common dates between returns and VaR series")
-    
-    aligned_returns = returns.loc[common_dates]
-    aligned_var = var_series.loc[common_dates]
-    
-    return aligned_returns, aligned_var
-
-
-def align_returns_and_cvar(
-    returns: pd.Series,
-    cvar_series: pd.Series
-) -> Tuple[pd.Series, pd.Series]:
-    """
-    Align returns and CVaR series to common dates.
-    
-    Args:
-        returns: Series of returns with dates as index
-        cvar_series: Series of CVaR values with dates as index
+        simulated, fitted_df = simulate_parametric_student_t(
+            returns_window, num_simulations, horizon,
+            df=cached_df, df_mode=df_mode, fixed_df=fixed_df,
+            bounds=bounds, fallback_df=fallback_df, random_seed=random_seed
+        )
+        fitted_params['window_mu'] = returns_window.mean()
+        fitted_params['window_sigma'] = returns_window.std()
+        fitted_params['student_t_df'] = fitted_df
         
-    Returns:
-        Tuple of (aligned_returns, aligned_cvar)
-    """
-    # Find common dates
-    common_dates = returns.index.intersection(cvar_series.index)
+    elif method == 'filtered_ewma_bootstrap':
+        filter_config = method_config.get('filter', {})
+        lambda_param = filter_config.get('lambda', 0.94)
+        min_variance_floor = filter_config.get('min_variance_floor', 1e-12)
+        
+        shock_config = method_config.get('shock_resampling', {})
+        bootstrap_type = shock_config.get('bootstrap_type', 'iid')
+        block_bootstrap = shock_config.get('block_bootstrap', {})
+        block_length = block_bootstrap.get('block_length') if block_bootstrap.get('enabled') else None
+        
+        reconstruction = method_config.get('reconstruction', {})
+        mu_rule = reconstruction.get('mu_rule', 'zero_or_sample_mean')
+        
+        simulated = simulate_filtered_ewma_bootstrap(
+            returns_window, num_simulations, horizon,
+            lambda_param, min_variance_floor, bootstrap_type,
+            block_length, mu_rule, random_seed
+        )
+        fitted_params['ewma_lambda'] = lambda_param
+        
+    else:
+        raise ValueError(f"Unknown method: {method}")
     
-    if len(common_dates) == 0:
-        raise ValueError("No common dates between returns and CVaR series")
+    fitted_params['fit_success'] = np.any(np.isfinite(simulated))
+    fitted_params['effective_sample_size'] = len(returns_window)
     
-    aligned_returns = returns.loc[common_dates]
-    aligned_cvar = cvar_series.loc[common_dates]
-    
-    return aligned_returns, aligned_cvar
+    return simulated, fitted_params

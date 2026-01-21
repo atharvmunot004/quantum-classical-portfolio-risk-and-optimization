@@ -1,7 +1,5 @@
 """
 Report generation module for Monte Carlo VaR/CVaR evaluation results.
-
-Generates comprehensive markdown reports with all evaluation metrics and insights.
 """
 import pandas as pd
 import numpy as np
@@ -18,28 +16,17 @@ def generate_report(
     time_sliced_metrics_df: Optional[pd.DataFrame] = None,
     report_sections: Optional[List[str]] = None
 ) -> str:
-    """
-    Generate comprehensive markdown report from metrics DataFrame.
-    
-    Args:
-        metrics_df: DataFrame with all computed metrics
-        output_path: Path to save the report
-        monte_carlo_settings: Dictionary with Monte Carlo settings
-        risk_series_df: Optional DataFrame with risk series data
-        time_sliced_metrics_df: Optional DataFrame with time-sliced metrics
-        report_sections: List of sections to include (default matches llm.json spec)
-        
-    Returns:
-        Report content as string
-    """
+    """Generate comprehensive markdown report from metrics DataFrame."""
     if report_sections is None:
         report_sections = [
-            "model_configuration",
-            "simulation_design",
-            "batch_execution_summary",
-            "aggregate_backtesting_results",
-            "tail_behavior_summary",
-            "runtime_statistics"
+            'methodology_overview',
+            'monte_carlo_methods_and_assumptions',
+            'rolling_forecast_construction',
+            'backtesting_results',
+            'time_sliced_backtesting',
+            'tail_risk_behavior',
+            'distributional_characteristics',
+            'key_insights'
         ]
     
     report_lines = []
@@ -52,49 +39,9 @@ def generate_report(
     report_lines.append("**Scope:** Asset-level evaluation only (no portfolio aggregation)")
     report_lines.append("")
     
-    # Model Configuration
-    if "model_configuration" in report_sections:
-        report_lines.append("## Model Configuration")
-        report_lines.append("")
-        if monte_carlo_settings:
-            report_lines.append("### Distribution Estimation")
-            report_lines.append("")
-            mean_model = monte_carlo_settings.get('mean_model', {})
-            covariance_model = monte_carlo_settings.get('covariance_model', {})
-            report_lines.append(f"- **Mean Model:** {mean_model.get('estimator', 'sample_mean')} (enabled: {mean_model.get('enabled', True)})")
-            report_lines.append(f"- **Covariance Model:** {covariance_model.get('estimator', 'sample_covariance')}")
-            shrinkage = covariance_model.get('shrinkage', {})
-            if shrinkage.get('enabled', False):
-                report_lines.append(f"  - **Shrinkage:** {shrinkage.get('method', 'ledoit_wolf')}")
-            report_lines.append("")
-    
-    # Kernel Loop Order Validation
-    if "kernel_loop_order_validation" in report_sections:
-        report_lines.append("## Kernel Loop Order Validation")
-        report_lines.append("")
-        report_lines.append("This implementation follows the time-first batch execution design:")
-        report_lines.append("")
-        report_lines.append("**Loop Order:** `time -> batch -> simulations`")
-        report_lines.append("")
-        report_lines.append("- **Outer loop:** time_index (rolling window end)")
-        report_lines.append("- **Inner loop:** portfolio_batch")
-        report_lines.append("- **Forbidden in batched path:**")
-        report_lines.append("  - `process_single_portfolio`")
-        report_lines.append("  - `compute_rolling_var`")
-        report_lines.append("  - `compute_rolling_cvar`")
-        report_lines.append("")
-        report_lines.append("**Design Rationale:**")
-        report_lines.append("Rolling Monte Carlo risk must be computed time-first: at each rolling window end index,")
-        report_lines.append("scenarios are generated/loaded once and reused to compute VaR/CVaR for the entire")
-        report_lines.append("portfolio batch via a single BLAS matmul, then ALL metrics are updated via streaming accumulators.")
-        report_lines.append("This eliminates per-portfolio rolling loops while preserving all metrics.")
-        report_lines.append("")
-    
-    # Simulation Design
-    if "simulation_design" in report_sections:
+    # Methodology Overview
+    if "methodology_overview" in report_sections:
         report_lines.append("## Methodology Overview")
-        report_lines.append("")
-        report_lines.append("### Monte Carlo Simulation for VaR and CVaR (Asset Level)")
         report_lines.append("")
         report_lines.append("Monte Carlo simulation generates multiple scenarios of asset returns based on historical data.")
         report_lines.append("VaR and CVaR are then calculated from the distribution of simulated returns per asset.")
@@ -105,64 +52,75 @@ def generate_report(
         report_lines.append("- Rolling window parameter estimation per asset")
         report_lines.append("- Forward return paths simulated per asset")
         report_lines.append("")
-        report_lines.append("**Advantages:**")
-        report_lines.append("- Can capture non-normal distributions")
-        report_lines.append("- Flexible with different distribution assumptions")
-        report_lines.append("- Provides both VaR and CVaR estimates")
-        report_lines.append("- Statistically coherent evaluation without portfolio aggregation confounds")
-        report_lines.append("")
-        report_lines.append("**Method:**")
-        report_lines.append("1. Estimate mean and volatility from historical returns per asset (rolling window)")
-        report_lines.append("2. Simulate multiple scenarios of future returns per asset")
-        report_lines.append("3. Calculate VaR as the quantile of simulated losses per asset")
-        report_lines.append("4. Calculate CVaR as the expected loss beyond VaR per asset")
-        report_lines.append("5. Perform backtesting and time-sliced evaluation per asset")
-        report_lines.append("")
     
-        report_lines.append("## Simulation Design")
+    # Monte Carlo Methods and Assumptions
+    if "monte_carlo_methods_and_assumptions" in report_sections:
+        report_lines.append("## Monte Carlo Methods and Assumptions")
         report_lines.append("")
         
         if monte_carlo_settings:
-            report_lines.append("### Simulation Parameters")
-            report_lines.append("")
-            report_lines.append(f"- **Number of Simulations:** {monte_carlo_settings.get('num_simulations', 'N/A'):,}")
-            report_lines.append(f"- **Distribution Type:** {monte_carlo_settings.get('distribution_type', 'N/A')}")
-            report_lines.append(f"- **Random Seed:** {monte_carlo_settings.get('random_seed', 'N/A')}")
-            report_lines.append(f"- **Confidence Levels:** {monte_carlo_settings.get('confidence_levels', [])}")
+            methods = monte_carlo_settings.get('methods', [])
+            for method in methods:
+                if not method.get('enabled', True):
+                    continue
+                
+                method_name = method.get('name', 'unknown')
+                report_lines.append(f"### {method_name.replace('_', ' ').title()}")
+                report_lines.append("")
+                
+                if method_name == 'historical_bootstrap':
+                    bootstrap_type = method.get('bootstrap_type', 'iid')
+                    block_bootstrap = method.get('block_bootstrap', {})
+                    report_lines.append(f"- **Bootstrap Type:** {bootstrap_type}")
+                    if block_bootstrap.get('enabled'):
+                        report_lines.append(f"- **Block Length:** {block_bootstrap.get('block_length', 'N/A')}")
+                
+                elif method_name == 'parametric_normal':
+                    fit_config = method.get('fit', {})
+                    report_lines.append(f"- **Mean:** {fit_config.get('mu', 'sample_mean')}")
+                    report_lines.append(f"- **Volatility:** {fit_config.get('sigma', 'sample_std')}")
+                
+                elif method_name == 'parametric_student_t':
+                    fit_config = method.get('fit', {})
+                    df_config = fit_config.get('df', {})
+                    report_lines.append(f"- **Mean:** {fit_config.get('mu', 'sample_mean')}")
+                    report_lines.append(f"- **Volatility:** {fit_config.get('sigma', 'sample_std')}")
+                    report_lines.append(f"- **DF Mode:** {df_config.get('mode', 'mle_or_fixed')}")
+                    report_lines.append(f"- **Fixed DF:** {df_config.get('fixed_df', 'N/A')}")
+                
+                elif method_name == 'filtered_ewma_bootstrap':
+                    filter_config = method.get('filter', {})
+                    report_lines.append(f"- **Lambda:** {filter_config.get('lambda', 'N/A')}")
+                
+                report_lines.append("")
+            
             horizons_config = monte_carlo_settings.get('horizons', {})
             if isinstance(horizons_config, dict):
-                base_horizon = horizons_config.get('base_horizon', 1)
-                scaled_horizons = horizons_config.get('scaled_horizons', [])
-                report_lines.append(f"- **Base Horizon:** {base_horizon} days")
-                report_lines.append(f"- **Scaled Horizons:** {scaled_horizons} days")
-                report_lines.append(f"- **Scaling Rule:** {horizons_config.get('scaling_rule', 'sqrt_time')}")
-            else:
-                report_lines.append(f"- **Horizons:** {horizons_config} days")
+                report_lines.append("### Horizon Handling")
+                report_lines.append("")
+                report_lines.append(f"- **Method:** {horizons_config.get('horizon_handling', 'path_simulation')}")
+                report_lines.append(f"- **Base Horizon:** {horizons_config.get('base_horizon', 1)} days")
+                report_lines.append(f"- **Scaled Horizons:** {horizons_config.get('scaled_horizons', [])} days")
+                report_lines.append(f"- **Path Aggregation:** {monte_carlo_settings.get('path_aggregation_rule', 'sum')}")
+                report_lines.append("")
+    
+    # Rolling Forecast Construction
+    if "rolling_forecast_construction" in report_sections:
+        report_lines.append("## Rolling Forecast Construction")
+        report_lines.append("")
+        
+        if monte_carlo_settings:
+            rolling_config = monte_carlo_settings.get('rolling', {})
+            report_lines.append(f"- **Step Size:** {rolling_config.get('step_size', 1)}")
+            report_lines.append(f"- **Forecast Method:** {rolling_config.get('forecast_method', 'rolling')}")
+            report_lines.append(f"- **Forecast Target:** {rolling_config.get('forecast_target', 'one_step_ahead')}")
             report_lines.append(f"- **Estimation Windows:** {monte_carlo_settings.get('estimation_windows', [])} days")
-            report_lines.append("")
-            report_lines.append("### Design Principle")
-            report_lines.append("")
-            report_lines.append("- Asset-level simulation only (no portfolio projection)")
-            report_lines.append("- Parameter estimation per asset using rolling windows")
-            report_lines.append("- Forward return paths simulated per asset")
-            report_lines.append("- Parallel execution across assets for scalability")
+            report_lines.append(f"- **Number of Simulations:** {monte_carlo_settings.get('num_simulations', 'N/A'):,}")
             report_lines.append("")
     
-    # Summary
-    if "batch_execution_summary" in report_sections or "summary" in report_sections:
-        report_lines.append("## Summary")
-        report_lines.append("")
-        report_lines.append(f"- **Total Assets Evaluated:** {len(metrics_df['asset'].unique()) if 'asset' in metrics_df.columns else 'N/A'}")
-        report_lines.append(f"- **Total Configurations:** {len(metrics_df)}")
-        if risk_series_df is not None:
-            report_lines.append(f"- **Total Risk Series Observations:** {len(risk_series_df):,}")
-        if time_sliced_metrics_df is not None and len(time_sliced_metrics_df) > 0:
-            report_lines.append(f"- **Total Time-Sliced Metrics:** {len(time_sliced_metrics_df):,}")
-        report_lines.append("")
-    
-    # Aggregate Backtesting Results
-    if "aggregate_backtesting_results" in report_sections:
-        report_lines.append("## Aggregate Backtesting Results")
+    # Backtesting Results
+    if "backtesting_results" in report_sections:
+        report_lines.append("## Backtesting Results")
         report_lines.append("")
         
         if 'hit_rate' in metrics_df.columns:
@@ -173,8 +131,6 @@ def generate_report(
         if 'violation_ratio' in metrics_df.columns:
             avg_violation_ratio = metrics_df['violation_ratio'].mean()
             report_lines.append(f"- **Average Violation Ratio:** {avg_violation_ratio:.4f}")
-            report_lines.append("  - Ratio > 1 indicates overestimation of risk")
-            report_lines.append("  - Ratio < 1 indicates underestimation of risk")
             report_lines.append("")
         
         if 'traffic_light_zone' in metrics_df.columns:
@@ -182,41 +138,39 @@ def generate_report(
             report_lines.append("### Traffic Light Zones")
             report_lines.append("")
             for zone, count in zone_counts.items():
-                report_lines.append(f"- **{zone.capitalize()}:** {count} portfolios ({count/len(metrics_df)*100:.1f}%)")
+                report_lines.append(f"- **{zone.capitalize()}:** {count} ({count/len(metrics_df)*100:.1f}%)")
             report_lines.append("")
         
         if 'kupiec_unconditional_coverage' in metrics_df.columns:
             kupiec_passed = (metrics_df['kupiec_unconditional_coverage'] > 0.05).sum()
-            report_lines.append(f"- **Kupiec Test Passed:** {kupiec_passed}/{len(metrics_df)} portfolios ({kupiec_passed/len(metrics_df)*100:.1f}%)")
-            report_lines.append("")
-    
-    # VaR/CVaR Comparison
-    if "var_cvar_comparison" in report_sections:
-        report_lines.append("## VaR vs CVaR Comparison")
-        report_lines.append("")
-        report_lines.append("CVaR (Conditional Value at Risk) provides additional insight into tail risk beyond VaR.")
-        report_lines.append("")
-        
-        if 'cvar_mean_exceedance' in metrics_df.columns:
-            avg_cvar_mean = metrics_df['cvar_mean_exceedance'].mean()
-            avg_var_mean = metrics_df['mean_exceedance'].mean() if 'mean_exceedance' in metrics_df.columns else np.nan
-            report_lines.append(f"- **Average CVaR Mean Exceedance:** {avg_cvar_mean:.6f}")
-            if not np.isnan(avg_var_mean):
-                report_lines.append(f"- **Average VaR Mean Exceedance:** {avg_var_mean:.6f}")
-                report_lines.append(f"- **Difference:** {avg_cvar_mean - avg_var_mean:.6f}")
+            report_lines.append(f"- **Kupiec Test Passed:** {kupiec_passed}/{len(metrics_df)} ({kupiec_passed/len(metrics_df)*100:.1f}%)")
             report_lines.append("")
         
-        if 'cvar_max_exceedance' in metrics_df.columns:
-            avg_cvar_max = metrics_df['cvar_max_exceedance'].mean()
-            avg_var_max = metrics_df['max_exceedance'].mean() if 'max_exceedance' in metrics_df.columns else np.nan
-            report_lines.append(f"- **Average CVaR Max Exceedance:** {avg_cvar_max:.6f}")
-            if not np.isnan(avg_var_max):
-                report_lines.append(f"- **Average VaR Max Exceedance:** {avg_var_max:.6f}")
+        if 'christoffersen_conditional_coverage' in metrics_df.columns:
+            cc_passed = (metrics_df['christoffersen_conditional_coverage'] > 0.05).sum()
+            report_lines.append(f"- **Christoffersen Conditional Coverage Passed:** {cc_passed}/{len(metrics_df)} ({cc_passed/len(metrics_df)*100:.1f}%)")
             report_lines.append("")
     
-    # Tail Behavior Summary
-    if "tail_behavior_summary" in report_sections:
-        report_lines.append("## Tail Behavior Summary")
+    # Time-Sliced Backtesting
+    if "time_sliced_backtesting" in report_sections and time_sliced_metrics_df is not None and len(time_sliced_metrics_df) > 0:
+        report_lines.append("## Time-Sliced Backtesting")
+        report_lines.append("")
+        
+        if 'slice_type' in time_sliced_metrics_df.columns:
+            for slice_type in time_sliced_metrics_df['slice_type'].unique():
+                report_lines.append(f"### By {slice_type.title()}")
+                report_lines.append("")
+                
+                slice_data = time_sliced_metrics_df[time_sliced_metrics_df['slice_type'] == slice_type]
+                if 'hit_rate' in slice_data.columns:
+                    avg_hit_rate = slice_data['hit_rate'].mean()
+                    report_lines.append(f"- **Average Hit Rate:** {avg_hit_rate:.4f}")
+                    report_lines.append("")
+                report_lines.append("")
+    
+    # Tail Risk Behavior
+    if "tail_risk_behavior" in report_sections:
+        report_lines.append("## Tail Risk Behavior")
         report_lines.append("")
         
         if 'mean_exceedance' in metrics_df.columns:
@@ -233,110 +187,56 @@ def generate_report(
             avg_cvar_mean_exceedance = metrics_df['cvar_mean_exceedance'].mean()
             report_lines.append(f"- **Average CVaR Mean Exceedance:** {avg_cvar_mean_exceedance:.6f}")
             report_lines.append("")
-        
-        if 'cvar_max_exceedance' in metrics_df.columns:
-            avg_cvar_max_exceedance = metrics_df['cvar_max_exceedance'].mean()
-            report_lines.append(f"- **Average CVaR Max Exceedance:** {avg_cvar_max_exceedance:.6f}")
-            report_lines.append("")
     
-    # Tail Behavior Summary
-    if "tail_behavior_summary" in report_sections:
-        report_lines.append("## Tail Behavior Summary")
+    # Distributional Characteristics
+    if "distributional_characteristics" in report_sections:
+        report_lines.append("## Distributional Characteristics")
         report_lines.append("")
-        
-        if 'mean_exceedance' in metrics_df.columns:
-            avg_mean_exceedance = metrics_df['mean_exceedance'].mean()
-            report_lines.append(f"- **Average Mean Exceedance (VaR):** {avg_mean_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'max_exceedance' in metrics_df.columns:
-            avg_max_exceedance = metrics_df['max_exceedance'].mean()
-            report_lines.append(f"- **Average Max Exceedance (VaR):** {avg_max_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'cvar_mean_exceedance' in metrics_df.columns:
-            avg_cvar_mean_exceedance = metrics_df['cvar_mean_exceedance'].mean()
-            report_lines.append(f"- **Average CVaR Mean Exceedance:** {avg_cvar_mean_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'cvar_max_exceedance' in metrics_df.columns:
-            avg_cvar_max_exceedance = metrics_df['cvar_max_exceedance'].mean()
-            report_lines.append(f"- **Average CVaR Max Exceedance:** {avg_cvar_max_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'num_active_assets' in metrics_df.columns:
-            avg_active_assets = metrics_df['num_active_assets'].mean()
-            report_lines.append(f"- **Average Number of Active Assets:** {avg_active_assets:.2f}")
-            report_lines.append("")
-        
-        if 'hhi_concentration' in metrics_df.columns:
-            avg_hhi = metrics_df['hhi_concentration'].mean()
-            report_lines.append(f"- **Average HHI Concentration:** {avg_hhi:.4f}")
-            report_lines.append("  - Higher values indicate more concentrated portfolios")
-            report_lines.append("")
         
         if 'skewness' in metrics_df.columns:
             avg_skewness = metrics_df['skewness'].mean()
             report_lines.append(f"- **Average Skewness:** {avg_skewness:.4f}")
-            report_lines.append("  - Negative values indicate left-skewed (tail risk)")
             report_lines.append("")
         
         if 'kurtosis' in metrics_df.columns:
             avg_kurtosis = metrics_df['kurtosis'].mean()
             report_lines.append(f"- **Average Excess Kurtosis:** {avg_kurtosis:.4f}")
-            report_lines.append("  - Positive values indicate fat tails")
-            report_lines.append("")
-    
-    # Runtime Statistics
-    if "runtime_statistics" in report_sections:
-        report_lines.append("## Runtime Statistics")
-        report_lines.append("")
-        
-        if 'simulation_time_ms' in metrics_df.columns:
-            avg_sim_time = metrics_df['simulation_time_ms'].mean()
-            report_lines.append(f"- **Average Simulation Time:** {avg_sim_time:.2f} ms")
             report_lines.append("")
         
-        if 'runtime_per_portfolio_ms' in metrics_df.columns:
-            avg_runtime = metrics_df['runtime_per_portfolio_ms'].mean()
-            report_lines.append(f"- **Average Runtime per Portfolio:** {avg_runtime:.2f} ms")
+        if 'jarque_bera_p_value' in metrics_df.columns:
+            jb_passed = (metrics_df['jarque_bera_p_value'] > 0.05).sum()
+            report_lines.append(f"- **Jarque-Bera Normality Test Passed:** {jb_passed}/{len(metrics_df)} ({jb_passed/len(metrics_df)*100:.1f}%)")
+            report_lines.append("")
+    
+    # Key Insights
+    if "key_insights" in report_sections:
+        report_lines.append("## Key Insights")
+        report_lines.append("")
+        
+        if 'method' in metrics_df.columns:
+            report_lines.append("### Method Comparison")
+            report_lines.append("")
+            method_summary = metrics_df.groupby('method').agg({
+                'hit_rate': 'mean',
+                'violation_ratio': 'mean',
+                'kupiec_unconditional_coverage': lambda x: (x > 0.05).mean()
+            })
+            report_lines.append("```")
+            report_lines.append(method_summary.to_string())
+            report_lines.append("```")
             report_lines.append("")
         
-        if 'p95_runtime_ms' in metrics_df.columns:
-            p95_runtime = metrics_df['p95_runtime_ms'].mean()
-            report_lines.append(f"- **95th Percentile Runtime:** {p95_runtime:.2f} ms")
+        if 'confidence_level' in metrics_df.columns:
+            report_lines.append("### Confidence Level Comparison")
             report_lines.append("")
-    
-    # Memory Statistics
-    if "memory_statistics" in report_sections:
-        report_lines.append("## Memory Statistics")
-        report_lines.append("")
-        report_lines.append("Memory usage statistics are tracked during batch execution.")
-        report_lines.append("Check batch_progress.json in the cache directory for detailed memory metrics.")
-        report_lines.append("")
-        report_lines.append("**Key Metrics:**")
-        report_lines.append("- Peak RSS (Resident Set Size): Peak memory usage during execution")
-        report_lines.append("- Swap Usage: Should be 0 MB (swap usage indicates memory pressure)")
-        report_lines.append("")
-        report_lines.append("**Memory Optimization Features:**")
-        report_lines.append("- Float32 used for simulations and projections (halves memory footprint)")
-        report_lines.append("- Thread-based parallelism (avoids process memory duplication)")
-        report_lines.append("- Shard-based I/O (reduces memory spikes from large DataFrames)")
-        report_lines.append("")
-    
-    # Summary Statistics Table
-    report_lines.append("## Summary Statistics")
-    report_lines.append("")
-    report_lines.append("### Aggregate Metrics")
-    report_lines.append("")
-    
-    numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
-    if len(numeric_cols) > 0:
-        summary_stats = metrics_df[numeric_cols].describe()
-        report_lines.append("```")
-        report_lines.append(summary_stats.to_string())
-        report_lines.append("```")
-        report_lines.append("")
+            conf_summary = metrics_df.groupby('confidence_level').agg({
+                'hit_rate': 'mean',
+                'violation_ratio': 'mean'
+            })
+            report_lines.append("```")
+            report_lines.append(conf_summary.to_string())
+            report_lines.append("```")
+            report_lines.append("")
     
     report_content = "\n".join(report_lines)
     
@@ -347,4 +247,3 @@ def generate_report(
         f.write(report_content)
     
     return report_content
-

@@ -3,7 +3,9 @@ Monte Carlo Simulation for Value-at-Risk (VaR) and Conditional Value-at-Risk (CV
 
 This module implements comprehensive asset-level VaR and CVaR evaluation using Monte Carlo simulation including:
 - Asset-level daily returns computation
+- Multiple simulation methods (historical bootstrap, parametric normal, Student-t, filtered EWMA)
 - Rolling VaR and CVaR calculation via Monte Carlo simulation per asset
+- Path simulation for multi-horizon forecasts
 - Backtesting with violation analysis for both VaR and CVaR per asset
 - Comprehensive performance metrics per asset
 - Time-sliced metrics (year/quarter/month) per asset
@@ -13,10 +15,14 @@ This module implements comprehensive asset-level VaR and CVaR evaluation using M
 from .main import evaluate_monte_carlo_var_cvar
 from .returns import load_panel_prices, compute_daily_returns
 from .monte_carlo_calculator import (
-    estimate_asset_return_distribution,
-    simulate_asset_return_scenarios,
-    scale_horizon_covariance,
-    compute_var_cvar_from_simulations_efficient
+    simulate_returns,
+    simulate_returns_paths,
+    compute_var_cvar,
+    simulate_historical_bootstrap,
+    simulate_parametric_normal,
+    simulate_parametric_student_t,
+    simulate_filtered_ewma_bootstrap,
+    fit_student_t_df
 )
 from .backtesting import (
     detect_var_violations,
@@ -40,10 +46,14 @@ __all__ = [
     'evaluate_monte_carlo_var_cvar',
     'load_panel_prices',
     'compute_daily_returns',
-    'estimate_asset_return_distribution',
-    'simulate_asset_return_scenarios',
-    'scale_horizon_covariance',
-    'compute_var_cvar_from_simulations_efficient',
+    'simulate_returns',
+    'simulate_returns_paths',
+    'compute_var_cvar',
+    'simulate_historical_bootstrap',
+    'simulate_parametric_normal',
+    'simulate_parametric_student_t',
+    'simulate_filtered_ewma_bootstrap',
+    'fit_student_t_df',
     'detect_var_violations',
     'detect_cvar_violations',
     'compute_hit_rate',
@@ -58,4 +68,3 @@ __all__ = [
     'compute_time_sliced_metrics',
     'generate_report',
 ]
-
