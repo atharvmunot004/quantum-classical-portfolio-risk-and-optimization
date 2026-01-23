@@ -5,7 +5,7 @@ Handles loading of prices and baseline portfolios.
 """
 import pandas as pd
 import numpy as np
-from typing import Union
+from typing import Union, Dict
 from pathlib import Path
 
 
@@ -131,3 +131,54 @@ def load_baseline_portfolios(baseline_portfolios_path: Union[str, Path]) -> pd.D
         raise ValueError(f"Unsupported file format: {baseline_portfolios_path.suffix}")
     
     return portfolios
+
+
+def load_investor_views(investor_views_path: Union[str, Path]) -> Dict:
+    """
+    Load investor views from JSON file.
+    
+    Args:
+        investor_views_path: Path to investor views JSON file
+        
+    Returns:
+        Dictionary containing investor views with 'absolute_views' and 'relative_views'
+    """
+    import json
+    
+    original_path = str(investor_views_path)
+    investor_views_path = Path(investor_views_path)
+    
+    if investor_views_path.is_absolute() and investor_views_path.exists():
+        pass
+    elif investor_views_path.exists():
+        pass
+    else:
+        current_file = Path(__file__)
+        project_root = current_file.parent.parent.parent.parent
+        investor_views_path = project_root / original_path
+        
+        if not investor_views_path.exists():
+            attempted_paths = [
+                str(Path(original_path).resolve()),
+                str(investor_views_path)
+            ]
+            raise FileNotFoundError(
+                f"Investor views file not found. Attempted paths:\n"
+                f"  1. {attempted_paths[0]}\n"
+                f"  2. {attempted_paths[1]}\n"
+                f"Please check that the file exists or update the path in llm.json"
+            )
+    
+    if investor_views_path.suffix != '.json':
+        raise ValueError(f"Investor views file must be JSON format, got: {investor_views_path.suffix}")
+    
+    with open(investor_views_path, 'r', encoding='utf-8') as f:
+        views = json.load(f)
+    
+    # Ensure structure
+    if 'absolute_views' not in views:
+        views['absolute_views'] = []
+    if 'relative_views' not in views:
+        views['relative_views'] = []
+    
+    return views

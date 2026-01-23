@@ -1,6 +1,46 @@
 {
   "absolute_views": [
     {
+      "asset": "ASIANPAINT",
+      "return": 0.11,
+      "confidence": 0.75
+    },
+    {
+      "asset": "BAJFINANCE",
+      "return": 0.13,
+      "confidence": 0.80
+    },
+    {
+      "asset": "HDFCBANK",
+      "return": 0.10,
+      "confidence": 0.75
+    },
+    {
+      "asset": "HINDUNILVR",
+      "return": 0.09,
+      "confidence": 0.70
+    },
+    {
+      "asset": "ICICIBANK",
+      "return": 0.11,
+      "confidence": 0.75
+    },
+    {
+      "asset": "INFY",
+      "return": 0.10,
+      "confidence": 0.70
+    },
+    {
+      "asset": "LT",
+      "return": 0.12,
+      "confidence": 0.72
+    },
+    {
+      "asset": "NTPC",
+      "return": 0.08,
+      "confidence": 0.65
+    },
+    {
       "asset": "RELIANCE",
       "return": 0.12,
       "confidence": 0.75
@@ -23,7 +63,30 @@
       "return_diff": -0.01,
       "confidence": 0.65,
       "comment": "TCS expected to outperform INFY by 1%"
+    },
+    {
+      "assets": ["ASIANPAINT", "HINDUNILVR"],
+      "return_diff": 0.02,
+      "confidence": 0.68,
+      "comment": "ASIANPAINT expected to outperform HINDUNILVR by 2%"
+    },
+    {
+      "assets": ["BAJFINANCE", "HDFCBANK"],
+      "return_diff": 0.03,
+      "confidence": 0.72,
+      "comment": "BAJFINANCE expected to outperform HDFCBANK by 3%"
+    },
+    {
+      "assets": ["LT", "NTPC"],
+      "return_diff": 0.04,
+      "confidence": 0.70,
+      "comment": "LT expected to outperform NTPC by 4%"
+    },
+    {
+      "assets": ["RELIANCE", "NTPC"],
+      "return_diff": 0.04,
+      "confidence": 0.68,
+      "comment": "RELIANCE expected to outperform NTPC by 4%"
     }
   ]
 }
-

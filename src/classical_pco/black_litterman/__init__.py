@@ -20,6 +20,7 @@ from .black_litterman_optimizer import (
 from .returns import (
     load_panel_prices,
     load_baseline_portfolios,
+    load_investor_views,
     compute_daily_returns
 )
 from .metrics import (
@@ -38,7 +39,29 @@ from .metrics import (
     compute_comparison_metrics,
     compute_runtime_metrics
 )
-from .report_generator import generate_report
+from .time_sliced_metrics import (
+    compute_time_sliced_returns,
+    compute_time_sliced_risk_metrics,
+    compute_time_sliced_tail_metrics,
+    compare_time_sliced_prior_vs_posterior,
+    analyze_temporal_performance_stability
+)
+from .report_generator import generate_report, generate_metrics_schema
+from .cache import BLCache
+
+# GPU acceleration utilities (optional)
+try:
+    from .gpu_acceleration import (
+        is_gpu_available,
+        get_gpu_info,
+        clear_gpu_cache,
+        compute_covariance_gpu,
+        matrix_inverse_gpu,
+        matrix_multiply_gpu
+    )
+    GPU_ACCELERATION_AVAILABLE = True
+except ImportError:
+    GPU_ACCELERATION_AVAILABLE = False
 
 __all__ = [
     'run_black_litterman_optimization',
@@ -52,6 +75,7 @@ __all__ = [
     'generate_efficient_frontier',
     'load_panel_prices',
     'load_baseline_portfolios',
+    'load_investor_views',
     'compute_daily_returns',
     'compute_portfolio_statistics',
     'compute_sharpe_ratio',
@@ -67,8 +91,26 @@ __all__ = [
     'compute_distribution_metrics',
     'compute_comparison_metrics',
     'compute_runtime_metrics',
-    'generate_report'
+    'compute_time_sliced_returns',
+    'compute_time_sliced_risk_metrics',
+    'compute_time_sliced_tail_metrics',
+    'compare_time_sliced_prior_vs_posterior',
+    'analyze_temporal_performance_stability',
+    'generate_report',
+    'generate_metrics_schema',
+    'BLCache'
 ]
+
+# Add GPU utilities to exports if available
+if GPU_ACCELERATION_AVAILABLE:
+    __all__.extend([
+        'is_gpu_available',
+        'get_gpu_info',
+        'clear_gpu_cache',
+        'compute_covariance_gpu',
+        'matrix_inverse_gpu',
+        'matrix_multiply_gpu'
+    ])
 
 __version__ = '1.0.0'
 
