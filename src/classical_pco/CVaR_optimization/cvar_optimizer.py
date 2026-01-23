@@ -154,8 +154,37 @@ def setup_cvar_linear_program(
     for _ in range(num_assets):
         bounds.append((min_weight, max_weight))
     
-    # VaR bounds (unbounded)
-    bounds.append((None, None))
+    # VaR bounds: need to bound from below to prevent unbounded problem
+    # When minimizing CVaR without return constraints, VaR can go to -infinity
+    # We bound VaR based on feasible portfolio returns
+    # Lower bound: worst-case portfolio return given constraints
+    if constraints.get('long_only', True) or constraints.get('no_short_selling', True):
+        # For long-only portfolios: minimum return is the worst return across all scenarios
+        # This happens when we invest 100% in the worst-performing asset
+        worst_case_return = np.min(scenario_matrix)
+    else:
+        # For portfolios with shorting: compute worst-case considering weight bounds
+        # Worst case: all negative weights at minimum, all positive at maximum
+        worst_returns = np.min(scenario_matrix, axis=0)
+        best_returns = np.max(scenario_matrix, axis=0)
+        # Conservative estimate: assume we can short up to -1.0 per asset
+        worst_case_return = np.sum(np.minimum(worst_returns * max_weight, best_returns * min_weight))
+    
+    # Set VaR lower bound: allow VaR to be below worst-case by a reasonable margin
+    # This ensures the problem is bounded while allowing flexibility
+    var_lower_bound = worst_case_return - 10.0  # Allow significant downside margin
+    
+    # Upper bound: best-case portfolio return
+    if constraints.get('long_only', True) or constraints.get('no_short_selling', True):
+        best_case_return = np.max(scenario_matrix)
+    else:
+        best_returns = np.max(scenario_matrix, axis=0)
+        worst_returns = np.min(scenario_matrix, axis=0)
+        best_case_return = np.sum(np.maximum(best_returns * max_weight, worst_returns * min_weight))
+    
+    var_upper_bound = best_case_return + 10.0  # Allow significant upside margin
+    
+    bounds.append((var_lower_bound, var_upper_bound))
     
     # z variable bounds (non-negative)
     for _ in range(num_scenarios):
@@ -186,7 +215,8 @@ def optimize_cvar_portfolio(
     constraints: Optional[Dict] = None,
     solver: str = 'highs',
     tolerance: float = 1e-6,
-    max_iterations: int = 100000
+    max_iterations: int = 100000,
+    portfolio_id: Optional[Union[int, str]] = None
 ) -> Tuple[pd.Series, Dict, float]:
     """
     Optimize portfolio to minimize CVaR using linear programming.
@@ -227,9 +257,25 @@ def optimize_cvar_portfolio(
         constraints=constraints
     )
     
+    num_assets = lp_formulation['num_assets']
+    num_scenarios = lp_formulation['num_scenarios']
+    
+    # Log LP setup details for first few portfolios
+    if portfolio_id is not None and str(portfolio_id) in ['0', '1', '2']:
+        print(f"    Setting up LP: {num_assets} assets, {num_scenarios} scenarios, confidence={confidence_level:.2f}")
+    
     # Solve linear program
     if solver == 'highs' or solver == 'scipy':
         # Use scipy.optimize.linprog
+        # Note: HiGHS doesn't recognize 'tol' option, so we only include it for other methods
+        options = {
+            'maxiter': max_iterations,
+            'disp': False
+        }
+        if solver != 'highs':
+            # For non-HiGHS methods, include tolerance
+            options['tol'] = tolerance
+        
         result = linprog(
             c=lp_formulation['c'],
             A_ub=lp_formulation['A_ub'],
@@ -238,17 +284,18 @@ def optimize_cvar_portfolio(
             b_eq=lp_formulation['b_eq'],
             bounds=lp_formulation['bounds'],
             method='highs' if solver == 'highs' else 'revised simplex',
-            options={
-                'maxiter': max_iterations,
-                'tol': tolerance,
-                'disp': False
-            }
+            options=options
         )
         
         if not result.success:
-            warnings.warn(f"Optimization failed: {result.message}")
+            # Log failure for first few portfolios, suppress warnings for others to avoid spam
+            should_log = portfolio_id is not None and str(portfolio_id) in ['0', '1', '2']
+            if should_log:
+                print(f"    Optimization failed: {result.message}")
+            # Only warn for first few portfolios to avoid terminal spam
+            if should_log:
+                warnings.warn(f"Optimization failed: {result.message}", category=UserWarning, stacklevel=2)
             # Return equal weights as fallback
-            num_assets = lp_formulation['num_assets']
             optimal_weights = pd.Series(
                 np.ones(num_assets) / num_assets,
                 index=range(num_assets)
@@ -411,12 +458,16 @@ def generate_cvar_return_frontier(
                 # Compute actual portfolio return
                 portfolio_return = expected_returns @ weights.values
                 
+                # Convert weights Series to dict for parquet compatibility
+                # Store weights as a dictionary that can be serialized
+                weights_dict = weights.to_dict()
+                
                 frontier_results.append({
                     'target_return': target_return,
                     'expected_return': portfolio_return,
                     'cvar': opt_info.get('cvar', np.nan),
                     'var': opt_info.get('var', np.nan),
-                    'weights': weights,
+                    'weights': weights_dict,  # Store as dict instead of Series
                     'optimization_status': 'success'
                 })
         except Exception as e:
@@ -428,6 +479,27 @@ def generate_cvar_return_frontier(
     
     # Convert to DataFrame
     frontier_df = pd.DataFrame(frontier_results)
+    
+    # Expand weights dict into separate columns for parquet compatibility
+    if 'weights' in frontier_df.columns and len(frontier_df) > 0:
+        # Get asset names from first weights entry
+        first_weights = frontier_df['weights'].iloc[0]
+        if isinstance(first_weights, dict):
+            asset_names = list(first_weights.keys())
+        elif isinstance(first_weights, pd.Series):
+            asset_names = first_weights.index.tolist()
+        else:
+            asset_names = []
+        
+        # Expand weights into separate columns
+        if len(asset_names) > 0:
+            for asset in asset_names:
+                frontier_df[f'weight_{asset}'] = frontier_df['weights'].apply(
+                    lambda w: w.get(asset, 0.0) if isinstance(w, dict) else (w[asset] if isinstance(w, pd.Series) and asset in w.index else 0.0)
+                )
+        
+        # Drop the original weights column (contains dict/Series objects not compatible with parquet)
+        frontier_df = frontier_df.drop(columns=['weights'])
     
     return frontier_df
 

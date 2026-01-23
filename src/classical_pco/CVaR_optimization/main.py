@@ -52,7 +52,7 @@ from .metrics import (
     compute_tail_risk_metrics,
     compute_runtime_metrics
 )
-from .report_generator import generate_report
+from .report_generator import generate_report, generate_metrics_schema
 
 
 def _save_restructured_json(
@@ -212,6 +212,10 @@ def _process_single_optimization(
             random_seed=random_seed
         )
         
+        # Log scenario generation details (only for first few portfolios to avoid spam)
+        if isinstance(portfolio_id, (int, str)) and str(portfolio_id) in ['0', '1', '2']:
+            print(f"  Portfolio {portfolio_id}: Generated {scenario_matrix.shape[0]} scenarios for {len(assets)} assets")
+        
         # Compute expected returns (mean of scenarios)
         expected_returns = pd.Series(
             scenario_matrix.mean(axis=0),
@@ -235,7 +239,8 @@ def _process_single_optimization(
             constraints=constraints,
             solver=solver_settings.get('lp_backend', 'highs'),
             tolerance=solver_settings.get('tolerance', 1e-6),
-            max_iterations=solver_settings.get('max_iterations', 100000)
+            max_iterations=solver_settings.get('max_iterations', 100000),
+            portfolio_id=portfolio_id  # Pass for logging
         )
         
         # Compute portfolio returns
@@ -314,9 +319,21 @@ def _process_single_optimization(
             'optimization_status': opt_info.get('status', 'unknown')
         }
         
+        # Log optimization status for first few portfolios
+        if isinstance(portfolio_id, (int, str)) and str(portfolio_id) in ['0', '1', '2']:
+            status = opt_info.get('status', 'unknown')
+            if status == 'success':
+                var_val = opt_info.get('var', 'N/A')
+                cvar_val = opt_info.get('cvar', 'N/A')
+                print(f"  Portfolio {portfolio_id}: Optimization {status} | VaR: {var_val:.6f} | CVaR: {cvar_val:.6f} | Time: {solver_time:.2f}ms")
+            else:
+                print(f"  Portfolio {portfolio_id}: Optimization {status} | Message: {opt_info.get('message', 'N/A')}")
+        
         return result, runtime_total
         
     except Exception as e:
+        if isinstance(portfolio_id, (int, str)) and str(portfolio_id) in ['0', '1', '2']:
+            print(f"  Portfolio {portfolio_id}: Exception - {e}")
         warnings.warn(f"Error optimizing portfolio {portfolio_id}: {e}")
         return {}, 0.0
 
@@ -362,12 +379,16 @@ def run_cvar_optimization(
     print("Loading data...")
     # Load data
     prices = load_panel_prices(inputs['panel_price_path'])
+    print(f"  Loaded prices: {len(prices):,} dates, {len(prices.columns):,} assets")
     baseline_portfolios = load_baseline_portfolios(inputs['baseline_portfolios_path'])
+    print(f"  Loaded {len(baseline_portfolios):,} baseline portfolios")
     risk_free_rate = inputs.get('risk_free_rate', 0.0)
+    print(f"  Risk-free rate: {risk_free_rate:.4f}")
     
-    print("Computing returns...")
+    print("\nComputing returns...")
     # Compute returns
     daily_returns = compute_daily_returns(prices, method=inputs.get('return_type', 'log'))
+    print(f"  Computed {len(daily_returns):,} daily returns using {inputs.get('return_type', 'log')} method")
     
     # Get data period
     data_period = f"{prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')}"
@@ -395,7 +416,23 @@ def run_cvar_optimization(
     all_weights = []
     cvar_frontiers = []
     
-    for portfolio_id in portfolio_ids:
+    total_start_time = time.time()
+    successful_count = 0
+    failed_count = 0
+    
+    print(f"\nStarting optimization of {num_portfolios:,} portfolios...")
+    print("=" * 80)
+    
+    for idx, portfolio_id in enumerate(portfolio_ids, 1):
+        # Progress logging every 100 portfolios or at milestones
+        if idx % 100 == 0 or idx == 1 or idx == num_portfolios:
+            elapsed = time.time() - total_start_time
+            rate = idx / elapsed if elapsed > 0 else 0
+            remaining = (num_portfolios - idx) / rate if rate > 0 else 0
+            print(f"[{idx:,}/{num_portfolios:,}] Processing portfolio {portfolio_id} | "
+                  f"Success: {successful_count:,} | Failed: {failed_count:,} | "
+                  f"Elapsed: {elapsed:.1f}s | ETA: {remaining:.1f}s")
+        
         result, runtime = _process_single_optimization(
             daily_returns,
             baseline_portfolios,
@@ -408,7 +445,18 @@ def run_cvar_optimization(
         if result:
             all_results.append(result)
             all_runtimes.append(runtime)
+            successful_count += 1
             # Store weights (would need to be retrieved from optimization)
+        else:
+            failed_count += 1
+            if idx % 1000 == 0:  # Log failures periodically
+                print(f"  Warning: Portfolio {portfolio_id} optimization failed")
+    
+    total_time = time.time() - total_start_time
+    print("=" * 80)
+    print(f"Optimization complete: {successful_count:,} successful, {failed_count:,} failed")
+    print(f"Total time: {total_time:.2f}s | Avg time per portfolio: {total_time/num_portfolios:.3f}s")
+    print("=" * 80)
     
     if len(all_results) == 0:
         raise RuntimeError("No portfolios were successfully optimized")
@@ -422,7 +470,7 @@ def run_cvar_optimization(
     
     # Generate CVaR-return frontier if requested
     if modules.get('generate_cvar_return_frontier', False):
-        print("Generating CVaR-return frontier...")
+        print("\nGenerating CVaR-return frontier...")
         try:
             # Use first portfolio's assets for frontier
             assets = daily_returns.columns.tolist()
@@ -457,39 +505,39 @@ def run_cvar_optimization(
         except Exception as e:
             warnings.warn(f"Failed to generate CVaR-return frontier: {e}")
     
-    print("Saving results...")
+    print("\nSaving results...")
     # Save outputs
     output_base = Path(outputs['metrics_table']).parent
     output_base.mkdir(parents=True, exist_ok=True)
     
     # Save metrics table
+    print(f"  Saving metrics to: {outputs['metrics_table']}")
     metrics_df.to_parquet(outputs['metrics_table'])
+    print(f"    Saved {len(metrics_df):,} rows, {len(metrics_df.columns)} columns")
     
     # Save optimal portfolios (weights)
     if 'optimal_portfolios' in outputs:
         # Create weights DataFrame placeholder
         weights_df = pd.DataFrame(index=metrics_df['portfolio_id'])
+        print(f"  Saving optimal portfolios to: {outputs['optimal_portfolios']}")
         weights_df.to_parquet(outputs['optimal_portfolios'])
     
     # Save CVaR-return frontier
     if 'cvar_return_frontier' in outputs and len(cvar_frontiers) > 0:
+        print(f"  Saving CVaR-return frontier to: {outputs['cvar_return_frontier']}")
         cvar_frontiers[0].to_parquet(outputs['cvar_return_frontier'])
+        print(f"    Saved {len(cvar_frontiers[0]):,} frontier points")
     
-    # Save JSON
-    portfolio_results = []
-    for _, row in metrics_df.iterrows():
-        portfolio_results.append(row.to_dict())
+    # Save metrics schema JSON (not full metrics - metrics are in parquet)
+    if 'metrics_schema_json' in outputs:
+        print(f"  Generating metrics schema...")
+        generate_metrics_schema(
+            metrics_df,
+            outputs['metrics_schema_json']
+        )
+        print(f"    Saved schema to: {outputs['metrics_schema_json']}")
     
-    _save_restructured_json(
-        Path(outputs['metrics_json']),
-        portfolio_results,
-        summary_stats,
-        data_period,
-        num_portfolios,
-        cvar_settings
-    )
-    
-    print("Generating report...")
+    print("\nGenerating report...")
     # Generate report
     generate_report(
         metrics_df,
@@ -497,8 +545,11 @@ def run_cvar_optimization(
         cvar_settings,
         report_sections
     )
+    print(f"Report saved to: {outputs['summary_report']}")
     
-    print("Optimization complete!")
+    print("\n" + "=" * 80)
+    print("OPTIMIZATION PIPELINE COMPLETE!")
+    print("=" * 80)
     
     return {
         'metrics_df': metrics_df,
