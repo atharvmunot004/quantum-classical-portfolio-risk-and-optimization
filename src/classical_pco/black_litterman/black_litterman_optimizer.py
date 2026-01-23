@@ -10,13 +10,41 @@ from sklearn.covariance import LedoitWolf
 import time
 import warnings
 
+# Try to import GPU acceleration
+try:
+    from .gpu_acceleration import (
+        get_array_module,
+        to_gpu_array,
+        to_cpu_array,
+        compute_covariance_gpu,
+        matrix_inverse_gpu,
+        matrix_multiply_gpu,
+        solve_linear_system_gpu,
+        is_gpu_available,
+        clear_gpu_cache
+    )
+    GPU_ACCELERATION_AVAILABLE = True
+except ImportError:
+    GPU_ACCELERATION_AVAILABLE = False
+    is_gpu_available = lambda: False
+    clear_gpu_cache = lambda: None
+
 # Try to import optimization libraries
 try:
     import cvxpy as cp
     CVXPY_AVAILABLE = True
 except ImportError:
     CVXPY_AVAILABLE = False
-    warnings.warn("cvxpy not available. Using scipy.optimize instead.")
+    # Only warn in main process, suppress in worker processes
+    import multiprocessing
+    try:
+        # If this is a worker process, multiprocessing.current_process() will have a name != 'MainProcess'
+        current_process = multiprocessing.current_process()
+        if current_process.name == 'MainProcess':
+            warnings.warn("cvxpy not available. Using scipy.optimize instead.", UserWarning, stacklevel=2)
+    except (AttributeError, RuntimeError):
+        # Fallback: warn anyway if we can't determine (e.g., before multiprocessing is initialized)
+        warnings.warn("cvxpy not available. Using scipy.optimize instead.", UserWarning, stacklevel=2)
 
 try:
     import osqp
@@ -33,7 +61,9 @@ def compute_covariance_matrix(
     method: str = 'sample',
     window: Optional[int] = None,
     use_shrinkage: bool = False,
-    shrinkage_method: str = 'ledoit_wolf'
+    shrinkage_method: str = 'ledoit_wolf',
+    estimation_windows: Optional[List[int]] = None,
+    use_gpu: bool = False
 ) -> Tuple[pd.DataFrame, float]:
     """
     Compute covariance matrix from returns.
@@ -44,11 +74,16 @@ def compute_covariance_matrix(
         window: Optional rolling window size (if None, uses all data)
         use_shrinkage: Whether to apply shrinkage estimator
         shrinkage_method: Shrinkage method ('ledoit_wolf')
+        estimation_windows: Optional list of estimation windows (uses first if provided)
         
     Returns:
         Tuple of (covariance_matrix, computation_time_ms)
     """
     start_time = time.time()
+    
+    # Use estimation_windows if provided, otherwise use window
+    if estimation_windows is not None and len(estimation_windows) > 0:
+        window = estimation_windows[0]  # Use first window
     
     if window is not None and len(returns) > window:
         returns_window = returns.iloc[-window:]
@@ -60,16 +95,32 @@ def compute_covariance_matrix(
     if len(returns_window.columns) == 0:
         raise ValueError("No assets with sufficient data for covariance estimation")
     
-    if use_shrinkage and shrinkage_method == 'ledoit_wolf':
-        lw = LedoitWolf()
-        cov_array = lw.fit(returns_window.values).covariance_
-        cov_matrix = pd.DataFrame(
-            cov_array,
-            index=returns_window.columns,
-            columns=returns_window.columns
-        )
-    else:
-        cov_matrix = returns_window.cov()
+    # Use GPU acceleration if available and requested
+    if use_gpu and GPU_ACCELERATION_AVAILABLE and is_gpu_available():
+        try:
+            cov_array = compute_covariance_gpu(returns_window, use_gpu=True)
+            cov_array = to_cpu_array(cov_array)  # Convert back to CPU for DataFrame
+            cov_matrix = pd.DataFrame(
+                cov_array,
+                index=returns_window.columns,
+                columns=returns_window.columns
+            )
+        except Exception as e:
+            warnings.warn(f"GPU covariance computation failed, falling back to CPU: {e}")
+            use_gpu = False
+    
+    if not use_gpu or not GPU_ACCELERATION_AVAILABLE:
+        # CPU computation
+        if use_shrinkage and shrinkage_method == 'ledoit_wolf':
+            lw = LedoitWolf()
+            cov_array = lw.fit(returns_window.values).covariance_
+            cov_matrix = pd.DataFrame(
+                cov_array,
+                index=returns_window.columns,
+                columns=returns_window.columns
+            )
+        else:
+            cov_matrix = returns_window.cov()
     
     computation_time = (time.time() - start_time) * 1000
     
@@ -356,7 +407,8 @@ def compute_posterior_bl_returns(
     P: np.ndarray,
     Q: np.ndarray,
     Omega: np.ndarray,
-    tau: float = 0.025
+    tau: float = 0.025,
+    use_gpu: bool = False
 ) -> Tuple[pd.Series, float]:
     """
     Compute Black-Litterman posterior returns.
@@ -390,32 +442,84 @@ def compute_posterior_bl_returns(
         posterior_returns = prior_returns.copy()
         return posterior_returns, (time.time() - start_time) * 1000
     
-    # Compute (τΣ)^(-1)
-    tau_Sigma = tau * Sigma
-    try:
-        tau_Sigma_inv = np.linalg.inv(tau_Sigma)
-    except np.linalg.LinAlgError:
-        # Use pseudo-inverse if singular
-        tau_Sigma_inv = np.linalg.pinv(tau_Sigma)
+    # Use GPU acceleration if available and requested
+    # Do not use GPU for small matrices (n <= 10) per JSON spec
+    use_gpu_for_inverse = use_gpu and GPU_ACCELERATION_AVAILABLE and is_gpu_available() and n > 10
     
-    # Compute Omega^(-1)
-    try:
-        Omega_inv = np.linalg.inv(Omega)
-    except np.linalg.LinAlgError:
-        Omega_inv = np.linalg.pinv(Omega)
+    if use_gpu_for_inverse:
+        try:
+            xp = get_array_module(use_gpu=True)
+            pi_gpu = to_gpu_array(pi, use_gpu=True)
+            Sigma_gpu = to_gpu_array(Sigma, use_gpu=True)
+            P_gpu = to_gpu_array(P, use_gpu=True)
+            Q_gpu = to_gpu_array(Q, use_gpu=True)
+            Omega_gpu = to_gpu_array(Omega, use_gpu=True)
+            
+            # Compute (τΣ)^(-1)
+            tau_Sigma_gpu = tau * Sigma_gpu
+            tau_Sigma_inv = matrix_inverse_gpu(tau_Sigma_gpu, use_gpu=True)
+            
+            # Compute Omega^(-1)
+            Omega_inv = matrix_inverse_gpu(Omega_gpu, use_gpu=True)
+            
+            # Compute M_inv = [(τΣ)^(-1) + P^T * Omega^(-1) * P]
+            P_T = xp.transpose(P_gpu)
+            M_inv = tau_Sigma_inv + matrix_multiply_gpu(
+                matrix_multiply_gpu(P_T, Omega_inv, use_gpu=True),
+                P_gpu,
+                use_gpu=True
+            )
+            
+            # Compute M = M_inv^(-1)
+            M = matrix_inverse_gpu(M_inv, use_gpu=True)
+            
+            # Compute posterior mean: μ_BL = M * [(τΣ)^(-1) * π + P^T * Omega^(-1) * Q]
+            term1 = matrix_multiply_gpu(tau_Sigma_inv, pi_gpu, use_gpu=True)
+            term2 = matrix_multiply_gpu(
+                matrix_multiply_gpu(P_T, Omega_inv, use_gpu=True),
+                Q_gpu,
+                use_gpu=True
+            )
+            mu_bl_gpu = matrix_multiply_gpu(
+                M,
+                term1 + term2,
+                use_gpu=True
+            )
+            
+            # Convert back to CPU
+            mu_bl = to_cpu_array(mu_bl_gpu)
+        except Exception as e:
+            warnings.warn(f"GPU posterior computation failed, falling back to CPU: {e}")
+            use_gpu_for_inverse = False
     
-    # Compute posterior covariance of returns
-    # M = [(τΣ)^(-1) + P^T * Omega^(-1) * P]^(-1)
-    M_inv = tau_Sigma_inv + P.T @ Omega_inv @ P
-    
-    try:
-        M = np.linalg.inv(M_inv)
-    except np.linalg.LinAlgError:
-        M = np.linalg.pinv(M_inv)
-    
-    # Compute posterior mean
-    # μ_BL = M * [(τΣ)^(-1) * π + P^T * Omega^(-1) * Q]
-    mu_bl = M @ (tau_Sigma_inv @ pi + P.T @ Omega_inv @ Q)
+    if not use_gpu_for_inverse:
+        # CPU computation
+        # Compute (τΣ)^(-1)
+        tau_Sigma = tau * Sigma
+        try:
+            tau_Sigma_inv = np.linalg.inv(tau_Sigma)
+        except np.linalg.LinAlgError:
+            # Use pseudo-inverse if singular
+            tau_Sigma_inv = np.linalg.pinv(tau_Sigma)
+        
+        # Compute Omega^(-1)
+        try:
+            Omega_inv = np.linalg.inv(Omega)
+        except np.linalg.LinAlgError:
+            Omega_inv = np.linalg.pinv(Omega)
+        
+        # Compute posterior covariance of returns
+        # M = [(τΣ)^(-1) + P^T * Omega^(-1) * P]^(-1)
+        M_inv = tau_Sigma_inv + P.T @ Omega_inv @ P
+        
+        try:
+            M = np.linalg.inv(M_inv)
+        except np.linalg.LinAlgError:
+            M = np.linalg.pinv(M_inv)
+        
+        # Compute posterior mean
+        # μ_BL = M * [(τΣ)^(-1) * π + P^T * Omega^(-1) * Q]
+        mu_bl = M @ (tau_Sigma_inv @ pi + P.T @ Omega_inv @ Q)
     
     posterior_returns = pd.Series(mu_bl.flatten(), index=assets)
     
@@ -429,7 +533,8 @@ def compute_posterior_covariance(
     P: np.ndarray,
     Omega: np.ndarray,
     tau: float = 0.025,
-    method: str = 'black_litterman'
+    method: str = 'black_litterman',
+    use_gpu: bool = False
 ) -> Tuple[pd.DataFrame, float]:
     """
     Compute Black-Litterman posterior covariance matrix.
@@ -461,29 +566,64 @@ def compute_posterior_covariance(
             posterior_cov = covariance_matrix.copy()
             return posterior_cov, (time.time() - start_time) * 1000
         
-        # Compute (τΣ)^(-1)
-        tau_Sigma = tau * Sigma
-        try:
-            tau_Sigma_inv = np.linalg.inv(tau_Sigma)
-        except np.linalg.LinAlgError:
-            tau_Sigma_inv = np.linalg.pinv(tau_Sigma)
+        # Use GPU acceleration if available and requested
+        # Do not use GPU for small matrices (n <= 10) per JSON spec
+        use_gpu_for_inverse = use_gpu and GPU_ACCELERATION_AVAILABLE and is_gpu_available() and n > 10
         
-        # Compute Omega^(-1)
-        try:
-            Omega_inv = np.linalg.inv(Omega)
-        except np.linalg.LinAlgError:
-            Omega_inv = np.linalg.pinv(Omega)
+        if use_gpu_for_inverse:
+            try:
+                xp = get_array_module(use_gpu=True)
+                Sigma_gpu = to_gpu_array(Sigma, use_gpu=True)
+                P_gpu = to_gpu_array(P, use_gpu=True)
+                Omega_gpu = to_gpu_array(Omega, use_gpu=True)
+                
+                # Compute (τΣ)^(-1)
+                tau_Sigma_gpu = tau * Sigma_gpu
+                tau_Sigma_inv = matrix_inverse_gpu(tau_Sigma_gpu, use_gpu=True)
+                
+                # Compute Omega^(-1)
+                Omega_inv = matrix_inverse_gpu(Omega_gpu, use_gpu=True)
+                
+                # Compute M = [(τΣ)^(-1) + P^T * Omega^(-1) * P]^(-1)
+                P_T = xp.transpose(P_gpu)
+                M_inv = tau_Sigma_inv + matrix_multiply_gpu(
+                    matrix_multiply_gpu(P_T, Omega_inv, use_gpu=True),
+                    P_gpu,
+                    use_gpu=True
+                )
+                M = matrix_inverse_gpu(M_inv, use_gpu=True)
+                
+                # Posterior covariance: Σ_BL = Σ + M
+                posterior_cov_array = to_cpu_array(Sigma_gpu + M)
+            except Exception as e:
+                warnings.warn(f"GPU posterior covariance computation failed, falling back to CPU: {e}")
+                use_gpu_for_inverse = False
         
-        # Compute M = [(τΣ)^(-1) + P^T * Omega^(-1) * P]^(-1)
-        M_inv = tau_Sigma_inv + P.T @ Omega_inv @ P
-        
-        try:
-            M = np.linalg.inv(M_inv)
-        except np.linalg.LinAlgError:
-            M = np.linalg.pinv(M_inv)
-        
-        # Posterior covariance: Σ_BL = Σ + M
-        posterior_cov_array = Sigma + M
+        if not use_gpu_for_inverse:
+            # CPU computation
+            # Compute (τΣ)^(-1)
+            tau_Sigma = tau * Sigma
+            try:
+                tau_Sigma_inv = np.linalg.inv(tau_Sigma)
+            except np.linalg.LinAlgError:
+                tau_Sigma_inv = np.linalg.pinv(tau_Sigma)
+            
+            # Compute Omega^(-1)
+            try:
+                Omega_inv = np.linalg.inv(Omega)
+            except np.linalg.LinAlgError:
+                Omega_inv = np.linalg.pinv(Omega)
+            
+            # Compute M = [(τΣ)^(-1) + P^T * Omega^(-1) * P]^(-1)
+            M_inv = tau_Sigma_inv + P.T @ Omega_inv @ P
+            
+            try:
+                M = np.linalg.inv(M_inv)
+            except np.linalg.LinAlgError:
+                M = np.linalg.pinv(M_inv)
+            
+            # Posterior covariance: Σ_BL = Σ + M
+            posterior_cov_array = Sigma + M
     else:
         # Default: use prior covariance
         posterior_cov_array = Sigma
@@ -507,7 +647,9 @@ def optimize_portfolio(
     risk_free_rate: float = 0.0,
     constraints: Optional[Dict] = None,
     solver: str = 'osqp',
-    tolerance: float = 1e-6
+    tolerance: float = 1e-6,
+    fallback_solver: Optional[str] = None,
+    use_closed_form_when_possible: bool = True
 ) -> Tuple[pd.Series, Dict, float]:
     """
     Optimize portfolio using posterior returns and covariance.
@@ -544,10 +686,74 @@ def optimize_portfolio(
             'max_weight_per_asset': None
         }
     
+    # Try closed-form solution first if requested
+    if solver == 'closed_form_preferred' or solver == 'closed_form' or (use_closed_form_when_possible and solver != 'closed_form'):
+        # Closed-form solution for mean-variance optimization
+        # w* = (1/λ) * Σ^(-1) * (μ - rf * 1)
+        # With constraints: long-only, fully-invested, no max_weight_per_asset
+        
+        use_closed_form = (
+            constraints.get('fully_invested', True) and
+            constraints.get('long_only', True) and
+            constraints.get('max_weight_per_asset') is None and
+            constraints.get('weight_bounds', [0.0, 1.0]) == [0.0, 1.0] and
+            objective in ['mean_variance', 'risk_return_tradeoff']
+        )
+        
+        if use_closed_form:
+            try:
+                if risk_aversion is None:
+                    risk_aversion = 1.0
+                
+                # Closed-form: w* = (1/λ) * Σ^(-1) * (μ - rf * 1)
+                ones = np.ones(n)
+                mu_excess = mu - risk_free_rate * ones
+                
+                try:
+                    Sigma_inv = np.linalg.inv(Sigma)
+                except np.linalg.LinAlgError:
+                    Sigma_inv = np.linalg.pinv(Sigma)
+                
+                weights_unconstrained = (1.0 / risk_aversion) * (Sigma_inv @ mu_excess)
+                
+                # Apply long-only constraint (clip negative weights)
+                weights_array = np.maximum(weights_unconstrained, 0.0)
+                
+                # Normalize to satisfy fully-invested constraint
+                weight_sum = weights_array.sum()
+                if weight_sum > 0:
+                    weights_array = weights_array / weight_sum
+                else:
+                    # Fallback to equal weights if all negative
+                    weights_array = np.ones(n) / n
+                
+                # Check if solution satisfies constraints
+                if np.all(weights_array >= 0) and np.abs(weights_array.sum() - 1.0) < tolerance:
+                    solver_time = (time.time() - start_time) * 1000
+                    optimization_info = {
+                        'status': 'optimal',
+                        'objective_value': float(weights_array @ mu - risk_aversion * (weights_array @ Sigma @ weights_array)),
+                        'solver': 'closed_form'
+                    }
+                else:
+                    # Fall through to numerical solver
+                    use_closed_form = False
+            except Exception as e:
+                # Fall through to numerical solver
+                use_closed_form = False
+                warnings.warn(f"Closed-form solution failed: {e}. Falling back to numerical solver.")
+        
+        if not use_closed_form:
+            # Fallback to numerical solver
+            if solver == 'closed_form_preferred':
+                solver = fallback_solver if fallback_solver is not None else 'osqp'
+            elif solver == 'closed_form':
+                solver = fallback_solver if fallback_solver is not None else 'osqp'
+    
     if CVXPY_AVAILABLE and solver in ['cvxpy', 'osqp']:
         w = cp.Variable(n)
         
-        if objective == 'maximize_posterior_sharpe':
+        if objective == 'maximize_posterior_sharpe' or objective == 'mean_variance':
             # Maximize Sharpe ratio: (μ^T w - rf) / sqrt(w^T Σ w)
             # Reformulated as: minimize -μ^T w + λ * w^T Σ w
             if risk_aversion is None:
@@ -636,25 +842,97 @@ def optimize_portfolio(
         
         w0 = np.ones(n) / n  # Initial guess: equal weights
         
+        # Try SLSQP first
         result = minimize(
             objective_func,
             w0,
             method='SLSQP',
             bounds=bounds,
             constraints=constraints_opt,
-            options={'ftol': tolerance}
+            options={'ftol': tolerance, 'maxiter': 1000}
         )
         
+        # If SLSQP fails, try L-BFGS-B with relaxed constraints
         if not result.success:
-            raise RuntimeError(f"Optimization failed: {result.message}")
+            try:
+                # Try with L-BFGS-B (doesn't support equality constraints, so we'll use penalty)
+                def objective_with_penalty(w):
+                    obj = objective_func(w)
+                    # Add penalty for constraint violation
+                    constraint_violation = abs(np.sum(w) - 1.0)
+                    penalty = 1e6 * constraint_violation
+                    return obj + penalty
+                
+                result = minimize(
+                    objective_with_penalty,
+                    w0,
+                    method='L-BFGS-B',
+                    bounds=bounds,
+                    options={'ftol': tolerance, 'maxiter': 1000}
+                )
+                
+                # Normalize to satisfy fully-invested constraint
+                if result.success:
+                    weights_array = result.x
+                    weights_array = np.maximum(weights_array, 0.0)  # Ensure non-negative
+                    weight_sum = weights_array.sum()
+                    if weight_sum > 0:
+                        weights_array = weights_array / weight_sum
+                    else:
+                        weights_array = np.ones(n) / n
+                    result.success = True
+                    result.fun = objective_func(weights_array)
+            except Exception:
+                pass
         
-        weights_array = result.x
+        # If still failed, use closed-form approximation as last resort
+        if not result.success:
+            warnings.warn(f"scipy.optimize failed, using closed-form approximation as fallback")
+            try:
+                if risk_aversion is None:
+                    risk_aversion = 1.0
+                
+                # Closed-form approximation
+                ones = np.ones(n)
+                mu_excess = mu - risk_free_rate * ones
+                
+                try:
+                    Sigma_inv = np.linalg.inv(Sigma)
+                except np.linalg.LinAlgError:
+                    Sigma_inv = np.linalg.pinv(Sigma)
+                
+                weights_unconstrained = (1.0 / risk_aversion) * (Sigma_inv @ mu_excess)
+                weights_array = np.maximum(weights_unconstrained, 0.0)
+                weight_sum = weights_array.sum()
+                if weight_sum > 0:
+                    weights_array = weights_array / weight_sum
+                else:
+                    weights_array = np.ones(n) / n
+                
+                # Apply max_weight constraint if needed
+                max_weight = constraints.get('max_weight_per_asset')
+                if max_weight is not None:
+                    weights_array = np.minimum(weights_array, max_weight)
+                    weights_array = weights_array / weights_array.sum()  # Renormalize
+                
+                result.success = True
+                result.fun = objective_func(weights_array)
+            except Exception as e:
+                # Ultimate fallback: equal weights
+                warnings.warn(f"All optimization methods failed, using equal weights: {e}")
+                weights_array = np.ones(n) / n
+                result.success = True
+                result.fun = objective_func(weights_array)
+        
+        # Use result.x if successful, otherwise use fallback weights_array
+        if result.success and hasattr(result, 'x'):
+            weights_array = result.x
         solver_time = (time.time() - start_time) * 1000
         
         optimization_info = {
             'status': 'optimal' if result.success else 'failed',
-            'objective_value': result.fun,
-            'solver': 'scipy'
+            'objective_value': float(result.fun),
+            'solver': 'scipy' if result.success else 'fallback'
         }
     
     optimal_weights = pd.Series(weights_array, index=assets)

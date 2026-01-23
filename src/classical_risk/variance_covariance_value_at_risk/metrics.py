@@ -1,7 +1,7 @@
 """
-Metrics computation module for VaR evaluation.
+Metrics computation module for Variance-Covariance VaR evaluation.
 
-Computes tail risk, portfolio structure, distribution, and runtime metrics.
+Computes tail risk, distribution, and runtime metrics at asset level.
 """
 import pandas as pd
 import numpy as np
@@ -62,52 +62,6 @@ def compute_tail_metrics(
     }
 
 
-def compute_structure_metrics(
-    portfolio_weights: pd.Series,
-    covariance_matrix: Optional[pd.DataFrame] = None
-) -> Dict[str, float]:
-    """
-    Compute portfolio structure metrics.
-    
-    Args:
-        portfolio_weights: Series of portfolio weights
-        covariance_matrix: Optional covariance matrix for condition number
-        
-    Returns:
-        Dictionary of structure metrics
-    """
-    weights_array = portfolio_weights.values
-    active_weights = weights_array[weights_array > 1e-10]  # Non-zero weights
-    
-    num_active_assets = len(active_weights)
-    
-    # HHI (Herfindahl-Hirschman Index) - concentration measure
-    hhi = np.sum(weights_array**2)
-    
-    # Effective number of assets (inverse of HHI)
-    enc = 1 / hhi if hhi > 0 else np.nan
-    
-    # Condition number of covariance matrix
-    condition_number = np.nan
-    if covariance_matrix is not None:
-        try:
-            cov_array = covariance_matrix.values
-            eigenvals = np.linalg.eigvals(cov_array)
-            eigenvals = eigenvals[eigenvals > 1e-10]  # Remove near-zero eigenvalues
-            if len(eigenvals) > 0:
-                condition_number = np.max(eigenvals) / np.min(eigenvals)
-        except:
-            condition_number = np.nan
-    
-    return {
-        'portfolio_size': num_active_assets,  # Number of assets with non-zero weights
-        'num_active_assets': num_active_assets,  # Alias for portfolio_size
-        'hhi_concentration': hhi,
-        'effective_number_of_assets': enc,
-        'covariance_condition_number': condition_number
-    }
-
-
 def compute_distribution_metrics(returns: pd.Series) -> Dict[str, float]:
     """
     Compute distribution metrics for returns.
@@ -153,16 +107,18 @@ def compute_runtime_metrics(runtimes: list[float]) -> Dict[str, float]:
     """
     if len(runtimes) == 0:
         return {
-            'runtime_per_portfolio_ms': np.nan,
+            'runtime_per_asset_ms': np.nan,
             'p95_runtime_ms': np.nan,
             'mean_runtime_ms': np.nan,
-            'median_runtime_ms': np.nan
+            'median_runtime_ms': np.nan,
+            'min_runtime_ms': np.nan,
+            'max_runtime_ms': np.nan
         }
     
     runtimes_array = np.array(runtimes)
     
     return {
-        'runtime_per_portfolio_ms': np.mean(runtimes_array) * 1000,
+        'runtime_per_asset_ms': np.mean(runtimes_array) * 1000,
         'p95_runtime_ms': np.percentile(runtimes_array, 95) * 1000,
         'mean_runtime_ms': np.mean(runtimes_array) * 1000,
         'median_runtime_ms': np.median(runtimes_array) * 1000,

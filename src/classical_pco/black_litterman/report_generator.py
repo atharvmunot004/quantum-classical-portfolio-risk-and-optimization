@@ -5,6 +5,7 @@ Generates comprehensive markdown reports with all optimization metrics and insig
 """
 import pandas as pd
 import numpy as np
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 from datetime import datetime
@@ -272,3 +273,72 @@ def generate_report(
     
     return report_content
 
+
+def generate_metrics_schema(
+    metrics_df: pd.DataFrame,
+    output_path: Union[str, Path]
+) -> Dict:
+    """
+    Generate metrics schema JSON from metrics DataFrame.
+    
+    Args:
+        metrics_df: DataFrame with all computed metrics
+        output_path: Path to save the schema JSON
+        
+    Returns:
+        Schema dictionary
+    """
+    schema = {
+        'metrics': {},
+        'metadata': {
+            'generated_at': datetime.now().isoformat(),
+            'num_metrics': len(metrics_df.columns),
+            'num_portfolios': len(metrics_df)
+        }
+    }
+    
+    # Categorize metrics based on naming patterns
+    for col in metrics_df.columns:
+        if col.startswith('_'):
+            continue  # Skip internal columns
+        
+        metric_info = {
+            'dtype': str(metrics_df[col].dtype),
+            'nullable': metrics_df[col].isna().any(),
+            'description': ''
+        }
+        
+        # Add description based on metric name
+        if 'sharpe' in col.lower():
+            metric_info['description'] = 'Sharpe ratio metric'
+        elif 'sortino' in col.lower():
+            metric_info['description'] = 'Sortino ratio metric'
+        elif 'drawdown' in col.lower():
+            metric_info['description'] = 'Drawdown metric'
+        elif 'volatility' in col.lower():
+            metric_info['description'] = 'Volatility metric'
+        elif 'return' in col.lower():
+            metric_info['description'] = 'Return metric'
+        elif 'var' in col.lower() or 'cvar' in col.lower():
+            metric_info['description'] = 'Risk metric (VaR/CVaR)'
+        elif 'hhi' in col.lower() or 'concentration' in col.lower():
+            metric_info['description'] = 'Concentration metric'
+        elif 'entropy' in col.lower():
+            metric_info['description'] = 'Entropy metric'
+        elif 'runtime' in col.lower() or 'time' in col.lower():
+            metric_info['description'] = 'Runtime metric'
+        elif 'prior' in col.lower() or 'posterior' in col.lower():
+            metric_info['description'] = 'Black-Litterman specific metric'
+        else:
+            metric_info['description'] = 'Portfolio metric'
+        
+        schema['metrics'][col] = metric_info
+    
+    # Write schema
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(schema, f, indent=2, ensure_ascii=False, default=str)
+    
+    return schema

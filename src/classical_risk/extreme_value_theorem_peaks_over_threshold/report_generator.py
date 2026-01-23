@@ -172,7 +172,10 @@ def generate_report(
     # Summary Statistics
     report_lines.append("## Summary Statistics")
     report_lines.append("")
-    report_lines.append(f"- **Total Portfolio-Configuration Combinations:** {len(metrics_df)}")
+    report_lines.append(f"- **Total Asset-Configuration Combinations:** {len(metrics_df)}")
+    if 'asset' in metrics_df.columns:
+        num_assets = metrics_df['asset'].nunique()
+        report_lines.append(f"- **Number of Assets Evaluated:** {num_assets}")
     report_lines.append("")
     
     # Backtesting Results
@@ -180,16 +183,42 @@ def generate_report(
         report_lines.append("## Backtesting Results")
         report_lines.append("")
         
-        if 'hit_rate' in metrics_df.columns:
-            avg_hit_rate = metrics_df['hit_rate'].mean()
-            report_lines.append(f"- **Average Hit Rate:** {avg_hit_rate:.4f}")
+        # Hit rate sanity check: explicitly report expected vs observed hit_rate per confidence level
+        if 'hit_rate' in metrics_df.columns and 'confidence_level' in metrics_df.columns:
+            report_lines.append("### Hit Rate Calibration Check")
             report_lines.append("")
+            for conf_level in sorted(metrics_df['confidence_level'].unique()):
+                conf_metrics = metrics_df[metrics_df['confidence_level'] == conf_level]
+                if len(conf_metrics) > 0:
+                    expected_rate = 1 - conf_level
+                    observed_rate = conf_metrics['hit_rate'].mean()
+                    report_lines.append(f"**Confidence Level {conf_level:.0%}:**")
+                    report_lines.append(f"  - Expected violation rate: {expected_rate:.4f}")
+                    report_lines.append(f"  - Observed hit rate: {observed_rate:.4f}")
+                    report_lines.append(f"  - Difference: {abs(observed_rate - expected_rate):.4f}")
+                    
+                    # Validation bounds
+                    if conf_level == 0.95:
+                        bounds = [0.03, 0.08]
+                    elif conf_level == 0.99:
+                        bounds = [0.005, 0.02]
+                    else:
+                        bounds = None
+                    
+                    if bounds:
+                        if bounds[0] <= observed_rate <= bounds[1]:
+                            report_lines.append(f"  - ✓ Within acceptable bounds [{bounds[0]:.3f}, {bounds[1]:.3f}]")
+                        else:
+                            report_lines.append(f"  - ⚠ Outside acceptable bounds [{bounds[0]:.3f}, {bounds[1]:.3f}]")
+                    report_lines.append("")
         
         if 'violation_ratio' in metrics_df.columns:
             avg_violation_ratio = metrics_df['violation_ratio'].mean()
             report_lines.append(f"- **Average Violation Ratio:** {avg_violation_ratio:.4f}")
-            report_lines.append("  - Ratio > 1 indicates overestimation of risk")
-            report_lines.append("  - Ratio < 1 indicates underestimation of risk")
+            report_lines.append("  - Ratio > 1 indicates underestimation of risk (excessive VaR breaches)")
+            report_lines.append("  - Ratio < 1 indicates overestimation of risk")
+            if avg_violation_ratio < 0.7 or avg_violation_ratio > 1.3:
+                report_lines.append(f"  - ⚠ Warning: Violation ratio outside acceptable bounds [0.7, 1.3]")
             report_lines.append("")
         
         if 'traffic_light_zone' in metrics_df.columns:
@@ -237,7 +266,22 @@ def generate_report(
         
         if 'tail_index_xi' in metrics_df.columns:
             avg_xi = metrics_df['tail_index_xi'].mean()
-            report_lines.append(f"- **Average Tail Index (ξ):** {avg_xi:.4f}")
+            std_xi = metrics_df['tail_index_xi'].std()
+            report_lines.append(f"- **Average Tail Index (ξ):** {avg_xi:.4f} (std: {std_xi:.4f})")
+            
+            # Xi boundary warning: warn when xi frequently hits constraint bounds
+            # Check if xi values are near bounds (assuming bounds are -0.5 and 0.5 from config)
+            near_lower = (metrics_df['tail_index_xi'] <= -0.45).sum()
+            near_upper = (metrics_df['tail_index_xi'] >= 0.45).sum()
+            total = len(metrics_df)
+            
+            if near_lower > 0.1 * total:
+                report_lines.append(f"  - ⚠ Warning: {near_lower}/{total} ({100*near_lower/total:.1f}%) configurations near lower bound (-0.5)")
+                report_lines.append("    This may indicate threshold instability or poor tail regime")
+            if near_upper > 0.1 * total:
+                report_lines.append(f"  - ⚠ Warning: {near_upper}/{total} ({100*near_upper/total:.1f}%) configurations near upper bound (0.5)")
+                report_lines.append("    This may indicate threshold instability or poor tail regime")
+            
             report_lines.append("")
         
         if 'shape_scale_stability' in metrics_df.columns:
@@ -246,20 +290,23 @@ def generate_report(
             report_lines.append("  - Lower values indicate more stable tail behavior")
             report_lines.append("")
     
-    # Portfolio Structure Effects
-    if "portfolio_structure_effects" in report_sections:
-        report_lines.append("## Portfolio Structure Effects")
+    # Asset-Level Insights
+    if "asset_level_insights" in report_sections or "portfolio_structure_effects" in report_sections:
+        report_lines.append("## Asset-Level Insights")
         report_lines.append("")
         
-        if 'num_active_assets' in metrics_df.columns:
-            avg_active_assets = metrics_df['num_active_assets'].mean()
-            report_lines.append(f"- **Average Number of Active Assets:** {avg_active_assets:.2f}")
+        if 'asset' in metrics_df.columns:
+            num_assets = metrics_df['asset'].nunique()
+            report_lines.append(f"- **Number of Assets Evaluated:** {num_assets}")
             report_lines.append("")
-        
-        if 'hhi_concentration' in metrics_df.columns:
-            avg_hhi = metrics_df['hhi_concentration'].mean()
-            report_lines.append(f"- **Average HHI Concentration:** {avg_hhi:.4f}")
-            report_lines.append("")
+            
+            # Asset-level statistics
+            if 'hit_rate' in metrics_df.columns:
+                asset_hit_rates = metrics_df.groupby('asset')['hit_rate'].mean()
+                report_lines.append(f"- **Average Hit Rate by Asset:**")
+                report_lines.append(f"  - Mean: {asset_hit_rates.mean():.4f}")
+                report_lines.append(f"  - Std: {asset_hit_rates.std():.4f}")
+                report_lines.append("")
     
     # Stability and Robustness Checks
     if "stability_and_robustness_checks" in report_sections:
@@ -269,7 +316,7 @@ def generate_report(
         if 'tail_index_xi' in metrics_df.columns:
             xi_std = metrics_df['tail_index_xi'].std()
             report_lines.append(f"- **Tail Index (ξ) Standard Deviation:** {xi_std:.4f}")
-            report_lines.append("  - Lower values indicate more stable tail behavior across portfolios")
+            report_lines.append("  - Lower values indicate more stable tail behavior across assets")
             report_lines.append("")
         
         if 'shape_scale_stability' in metrics_df.columns:
@@ -322,9 +369,9 @@ def generate_report(
         if 'violation_ratio' in metrics_df.columns:
             avg_vr = metrics_df['violation_ratio'].mean()
             if avg_vr > 1.2:
-                report_lines.append("- **Risk Overestimation:** EVT-POT tends to overestimate risk")
+                report_lines.append("- **Risk Underestimation:** EVT-POT tends to underestimate risk (excessive VaR breaches)")
             elif avg_vr < 0.8:
-                report_lines.append("- **Risk Underestimation:** EVT-POT tends to underestimate risk")
+                report_lines.append("- **Risk Overestimation:** EVT-POT tends to overestimate risk")
             else:
                 report_lines.append("- **Adequate Risk Estimation:** EVT-POT provides reasonable risk estimates")
             report_lines.append("")
@@ -343,9 +390,10 @@ def generate_report(
         report_lines.append("### Recommendations")
         report_lines.append("")
         report_lines.append("- EVT-POT is particularly effective for high confidence levels (99%, 99.5%)")
-        report_lines.append("- Monitor tail index (ξ) for stability across portfolios")
+        report_lines.append("- Monitor tail index (ξ) for stability across assets and time")
         report_lines.append("- Adjust threshold selection based on available data and required exceedances")
-        report_lines.append("- Consider EVT-POT for portfolios with heavy-tailed return distributions")
+        report_lines.append("- Consider EVT-POT for assets with heavy-tailed return distributions")
+        report_lines.append("- Rolling window estimation provides time-varying risk measures")
         report_lines.append("")
     
     # Detailed Metrics Table

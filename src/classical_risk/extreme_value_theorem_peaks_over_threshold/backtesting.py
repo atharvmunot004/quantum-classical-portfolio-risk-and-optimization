@@ -13,25 +13,26 @@ from typing import Dict, Tuple
 
 
 def detect_var_violations(
-    returns: pd.Series,
+    losses: pd.Series,
     var_series: pd.Series,
     confidence_level: float = 0.95
 ) -> pd.Series:
     """
-    Detect VaR violations (exceedances).
+    Detect VaR violations (exceedances) using losses.
     
-    A violation occurs when the actual return is less than -VaR.
+    Correct EVT-consistent violation definition: loss_t > VaR_t
+    Never compare returns directly to VaR.
     
     Args:
-        returns: Series of actual returns
-        var_series: Series of VaR values
+        losses: Series of actual losses (loss_t = -returns_t)
+        var_series: Series of VaR values (positive, represents loss quantile)
         confidence_level: Confidence level used for VaR calculation
         
     Returns:
         Boolean Series indicating violations (True = violation)
     """
-    # VaR is typically positive, so violation is when return < -VaR
-    violations = returns < -var_series
+    # Correct violation logic: losses > VaR
+    violations = losses > var_series
     
     return violations
 
@@ -287,49 +288,49 @@ def traffic_light_zone(
 
 
 def detect_cvar_violations(
-    returns: pd.Series,
+    losses: pd.Series,
     cvar_series: pd.Series,
     var_series: pd.Series,
     confidence_level: float = 0.95
 ) -> pd.Series:
     """
-    Detect CVaR violations (exceedances).
+    Detect CVaR violations (exceedances) using losses.
     
-    A CVaR violation occurs when the actual return is less than -CVaR.
+    A CVaR violation occurs when the actual loss exceeds CVaR.
     
     Args:
-        returns: Series of actual returns
-        cvar_series: Series of CVaR values
+        losses: Series of actual losses (loss_t = -returns_t)
+        cvar_series: Series of CVaR values (positive, represents expected loss given VaR exceeded)
         var_series: Series of VaR values (needed to identify tail events)
         confidence_level: Confidence level used for CVaR calculation
         
     Returns:
         Boolean Series indicating CVaR violations (True = violation)
     """
-    # CVaR violation: return < -CVaR (more severe than VaR)
-    cvar_violations = returns < -cvar_series
+    # CVaR violation: losses > CVaR (more severe than VaR)
+    cvar_violations = losses > cvar_series
     
     return cvar_violations
 
 
 def compute_accuracy_metrics(
-    returns: pd.Series,
+    losses: pd.Series,
     var_series: pd.Series,
     confidence_level: float = 0.95
 ) -> Dict[str, float]:
     """
-    Compute all accuracy metrics for VaR backtesting.
+    Compute all accuracy metrics for VaR backtesting using losses.
     
     Args:
-        returns: Series of actual returns
-        var_series: Series of VaR values
+        losses: Series of actual losses (loss_t = -returns_t)
+        var_series: Series of VaR values (positive, represents loss quantile)
         confidence_level: Confidence level used for VaR
         
     Returns:
         Dictionary of accuracy metrics
     """
-    violations = detect_var_violations(returns, var_series, confidence_level)
-    expected_violation_rate = 1 - confidence_level
+    violations = detect_var_violations(losses, var_series, confidence_level)
+    expected_violation_rate = 1 - confidence_level  # e.g., 0.05 for 95% VaR
     
     hit_rate = compute_hit_rate(violations)
     violation_ratio_val = compute_violation_ratio(violations, expected_violation_rate)

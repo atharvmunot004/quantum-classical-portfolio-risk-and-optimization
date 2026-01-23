@@ -1,0 +1,80 @@
+{
+  "risk_series": {
+    "path": "results/classical_risk/mcs_asset_var_cvar_series.parquet",
+    "rows": 503040,
+    "columns": [
+      "asset",
+      "date",
+      "method",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "VaR",
+      "CVaR",
+      "num_simulations",
+      "window_mu",
+      "window_sigma",
+      "student_t_df"
+    ]
+  },
+  "metrics": {
+    "path": "results/classical_risk/mcs_asset_level_metrics.parquet",
+    "rows": 240,
+    "columns": [
+      "asset",
+      "method",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "hit_rate",
+      "violation_ratio",
+      "num_violations",
+      "total_observations",
+      "expected_violations",
+      "kupiec_unconditional_coverage",
+      "kupiec_test_statistic",
+      "kupiec_reject_null",
+      "christoffersen_independence",
+      "christoffersen_independence_statistic",
+      "christoffersen_independence_reject_null",
+      "christoffersen_conditional_coverage",
+      "christoffersen_conditional_coverage_statistic",
+      "christoffersen_conditional_coverage_reject_null",
+      "traffic_light_zone",
+      "mean_exceedance",
+      "max_exceedance",
+      "std_exceedance",
+      "quantile_loss_score",
+      "rmse_var_vs_losses",
+      "cvar_mean_exceedance",
+      "cvar_max_exceedance",
+      "cvar_std_exceedance",
+      "skewness",
+      "kurtosis",
+      "jarque_bera_p_value",
+      "jarque_bera_statistic"
+    ]
+  },
+  "time_sliced_metrics": {
+    "path": "results/classical_risk/mcs_asset_level_time_sliced_metrics.parquet",
+    "rows": 35400,
+    "columns": [
+      "asset",
+      "method",
+      "slice_type",
+      "slice_value",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "slice",
+      "start_date",
+      "end_date",
+      "hit_rate",
+      "num_violations",
+      "expected_violations",
+      "violation_ratio",
+      "cvar_hit_rate",
+      "cvar_num_violations"
+    ]
+  }
+}

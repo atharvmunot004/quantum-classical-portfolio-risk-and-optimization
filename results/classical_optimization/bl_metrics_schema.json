@@ -1,0 +1,69 @@
+{
+  "metrics": {
+    "portfolio_id": {
+      "dtype": "int64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    },
+    "mean_return": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Return metric"
+    },
+    "volatility": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Volatility metric"
+    },
+    "sharpe_ratio": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Sharpe ratio metric"
+    },
+    "sortino_ratio": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Sortino ratio metric"
+    },
+    "max_drawdown": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Drawdown metric"
+    },
+    "calmar_ratio": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    },
+    "value_at_risk": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    },
+    "conditional_value_at_risk": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    },
+    "skewness": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    },
+    "kurtosis": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    },
+    "jarque_bera_p_value": {
+      "dtype": "float64",
+      "nullable": "False",
+      "description": "Portfolio metric"
+    }
+  },
+  "metadata": {
+    "generated_at": "2026-01-23T15:23:04.051035",
+    "num_metrics": 12,
+    "num_portfolios": 100000
+  }
+}

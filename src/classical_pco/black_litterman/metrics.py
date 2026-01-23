@@ -9,6 +9,7 @@ import numpy as np
 from scipy import stats
 from typing import Dict, Optional, Tuple
 import time
+import warnings
 
 
 def compute_portfolio_statistics(
@@ -235,7 +236,11 @@ def compute_bl_specific_metrics(
         prior_vec = prior_returns[assets].values
         posterior_vec = posterior_returns[assets].values
         metrics['prior_vs_posterior_distance'] = np.linalg.norm(posterior_vec - prior_vec)
-        metrics['prior_vs_posterior_correlation'] = np.corrcoef(prior_vec, posterior_vec)[0, 1]
+        # Suppress warnings for correlation computation with zero variance
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            corr_matrix = np.corrcoef(prior_vec, posterior_vec)
+            metrics['prior_vs_posterior_correlation'] = corr_matrix[0, 1] if corr_matrix.shape == (2, 2) else np.nan
     
     # View consistency
     assets = prior_returns.index.intersection(posterior_returns.index)
@@ -471,3 +476,114 @@ def compute_runtime_metrics(runtimes: list) -> Dict[str, float]:
         'max_runtime_ms': float(np.max(runtime_array))
     }
 
+
+def compute_batch_metrics_vectorized(
+    returns_matrix: np.ndarray,
+    risk_free_rate: float = 0.0,
+    use_gpu: bool = False
+) -> Dict[str, np.ndarray]:
+    """
+    Compute metrics in batch from returns matrix (T x N_portfolios).
+    
+    Args:
+        returns_matrix: Returns matrix (T x N_portfolios)
+        risk_free_rate: Risk-free rate
+        use_gpu: Whether to use GPU acceleration
+        
+    Returns:
+        Dictionary with metric arrays (each of shape N_portfolios)
+    """
+    try:
+        from .gpu_acceleration import (
+            batch_cumprod_running_max_for_drawdown,
+            batch_percentiles_for_var_cvar,
+            batch_mean_std_skew_kurtosis
+        )
+    except ImportError:
+        use_gpu = False
+    
+    T, N = returns_matrix.shape
+    
+    # Mean and std
+    if use_gpu:
+        stats_dict = batch_mean_std_skew_kurtosis(returns_matrix, use_gpu=True)
+        mean_returns = stats_dict['mean']
+        std_returns = stats_dict['std']
+        skewness = stats_dict['skew']
+        kurtosis = stats_dict['kurt']
+    else:
+        mean_returns = np.mean(returns_matrix, axis=0)
+        std_returns = np.std(returns_matrix, axis=0, ddof=1)
+        from scipy import stats
+        skewness = np.apply_along_axis(stats.skew, 0, returns_matrix)
+        kurtosis = np.apply_along_axis(stats.kurtosis, 0, returns_matrix)
+    
+    # Annualize
+    mean_returns_annual = mean_returns * 252
+    std_returns_annual = std_returns * np.sqrt(252)
+    
+    # Sharpe ratio
+    sharpe = np.where(std_returns_annual > 0,
+                     (mean_returns_annual - risk_free_rate) / std_returns_annual,
+                     np.nan)
+    
+    # Sortino ratio (downside deviation)
+    downside_returns = np.where(returns_matrix < 0, returns_matrix, 0)
+    downside_dev = np.sqrt(np.mean(downside_returns**2, axis=0))
+    downside_dev_annual = downside_dev * np.sqrt(252)
+    sortino = np.where(downside_dev_annual > 0,
+                      (mean_returns_annual - risk_free_rate) / downside_dev_annual,
+                      np.nan)
+    
+    # Max drawdown
+    if use_gpu:
+        cumulative, running_max = batch_cumprod_running_max_for_drawdown(returns_matrix, use_gpu=True)
+    else:
+        cumulative = np.cumprod(1 + returns_matrix, axis=0)
+        running_max = np.maximum.accumulate(cumulative, axis=0)
+    
+    drawdown = (cumulative - running_max) / running_max
+    max_drawdown = np.abs(np.min(drawdown, axis=0))
+    
+    # Calmar ratio
+    calmar = np.where(max_drawdown > 0,
+                     mean_returns_annual / max_drawdown,
+                     np.nan)
+    
+    # VaR and CVaR (95% confidence)
+    if use_gpu:
+        var_percentiles = batch_percentiles_for_var_cvar(returns_matrix, [5], use_gpu=True)
+        var_95 = np.abs(var_percentiles[0, :])
+    else:
+        var_95 = np.abs(np.percentile(returns_matrix, 5, axis=0))
+    
+    # CVaR: mean of returns below VaR
+    cvar_95 = np.zeros(N)
+    for i in range(N):
+        var_threshold = -var_95[i] if var_95[i] > 0 else np.percentile(returns_matrix[:, i], 5)
+        below_var = returns_matrix[returns_matrix[:, i] <= var_threshold, i]
+        cvar_95[i] = np.abs(np.mean(below_var)) if len(below_var) > 0 else np.nan
+    
+    # Jarque-Bera test
+    jb_pvalues = np.zeros(N)
+    for i in range(N):
+        if len(returns_matrix[:, i]) >= 3:
+            from scipy import stats
+            _, pvalue = stats.jarque_bera(returns_matrix[:, i])
+            jb_pvalues[i] = pvalue
+        else:
+            jb_pvalues[i] = np.nan
+    
+    return {
+        'mean_return': mean_returns_annual,
+        'volatility': std_returns_annual,
+        'sharpe_ratio': sharpe,
+        'sortino_ratio': sortino,
+        'max_drawdown': max_drawdown,
+        'calmar_ratio': calmar,
+        'value_at_risk': var_95,
+        'conditional_value_at_risk': cvar_95,
+        'skewness': skewness,
+        'kurtosis': kurtosis,
+        'jarque_bera_p_value': jb_pvalues
+    }

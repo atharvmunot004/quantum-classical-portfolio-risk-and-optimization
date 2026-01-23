@@ -1,344 +1,150 @@
-"""
-Report generation module for GARCH(1,1) VaR/CVaR evaluation results.
+"""Markdown report generation for GARCH VaR/CVaR evaluation."""
 
-Generates comprehensive markdown reports with all evaluation metrics and insights.
-"""
-import pandas as pd
-import numpy as np
+from __future__ import annotations
+
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-from datetime import datetime
+
+import numpy as np
+import pandas as pd
 
 
 def generate_report(
     metrics_df: pd.DataFrame,
-    output_path: Union[str, Path],
+    time_sliced_metrics_df: Optional[pd.DataFrame] = None,
+    output_path: Optional[Union[str, Path]] = None,
     garch_settings: Optional[Dict] = None,
     report_sections: Optional[List[str]] = None
 ) -> str:
-    """
-    Generate comprehensive markdown report from metrics DataFrame.
-    
-    Args:
-        metrics_df: DataFrame with all computed metrics
-        output_path: Path to save the report
-        garch_settings: Dictionary with GARCH settings
-        report_sections: List of sections to include
-        
-    Returns:
-        Report content as string
-    """
+    """Generate a concise IEEE-friendly markdown report."""
     if report_sections is None:
-        # Default sections from llm.json specification
         report_sections = [
             "model_configuration",
             "batch_execution_summary",
             "aggregate_backtesting_results",
             "tail_behavior_summary",
-            "runtime_statistics"
+            "garch_specification_and_estimation",
+            "robustness_and_normality_checks",
+            "runtime_statistics",
+            "time_sliced_backtesting"
         ]
-    
-    report_lines = []
-    
-    # Header
-    report_lines.append("# GARCH(1,1) Volatility Forecasting for VaR/CVaR Evaluation Report")
-    report_lines.append("")
-    report_lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    report_lines.append("")
-    
-    # Model Configuration
-    if "model_configuration" in report_sections:
-        report_lines.append("## Model Configuration")
-        report_lines.append("")
-        report_lines.append("### GARCH(1,1) Model Specification")
-        report_lines.append("")
-        report_lines.append("The GARCH(1,1) model specifies the conditional variance as:")
-        report_lines.append("")
-        report_lines.append("σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁")
-        report_lines.append("")
-        report_lines.append("Where:")
-        report_lines.append("- σ²ₜ is the conditional variance at time t")
-        report_lines.append("- ω is the constant term")
-        report_lines.append("- α captures the ARCH effect (lagged squared residuals)")
-        report_lines.append("- β captures the GARCH effect (lagged conditional variance)")
-        report_lines.append("- εₜ are the residuals")
-        report_lines.append("")
-        
-        if garch_settings:
-            report_lines.append("### Model Parameters")
-            report_lines.append("")
-            report_lines.append(f"- **GARCH Order (p):** {garch_settings.get('p', 1)}")
-            report_lines.append(f"- **ARCH Order (q):** {garch_settings.get('q', 1)}")
-            report_lines.append(f"- **Distribution:** {garch_settings.get('distribution', 'normal')}")
-            mean_model_config = garch_settings.get('mean_model', {})
-            use_mean_model = mean_model_config.get('enabled', False)
-            report_lines.append(f"- **Mean Model:** {'Zero' if not use_mean_model else 'AR/Constant'}")
-            report_lines.append(f"- **Return Type:** {garch_settings.get('return_type', 'log')}")
-            report_lines.append(f"- **Estimation Windows:** {garch_settings.get('estimation_windows', [])} days")
-            report_lines.append(f"- **Confidence Levels:** {garch_settings.get('confidence_levels', [])}")
-            horizons_config = garch_settings.get('horizons', {})
-            if isinstance(horizons_config, dict):
-                base_horizon = horizons_config.get('base_horizon', 1)
-                scaled_horizons = horizons_config.get('scaled_horizons', [])
-                scaling_rule = horizons_config.get('scaling_rule', 'sqrt_time')
-                report_lines.append(f"- **Base Horizon:** {base_horizon} days")
-                report_lines.append(f"- **Scaled Horizons:** {scaled_horizons}")
-                report_lines.append(f"- **Scaling Rule:** {scaling_rule}")
-            else:
-                report_lines.append(f"- **Horizons:** {horizons_config if isinstance(horizons_config, list) else [1, 10]} days")
-            report_lines.append(f"- **Forecast Method:** {garch_settings.get('forecast_method', 'rolling')}")
-            report_lines.append(f"- **Fallback to Long-Run Variance:** {garch_settings.get('fallback_long_run_variance', True)}")
-            report_lines.append("")
-        
-        report_lines.append("### Design Principle")
-        report_lines.append("")
-        report_lines.append("Asset-level GARCH parameters and conditional volatility paths are estimated")
-        report_lines.append("once and reused across all portfolio batches to ensure statistical consistency,")
-        report_lines.append("computational efficiency, and reproducibility across batched execution.")
-        report_lines.append("")
-    
-    # Legacy sections for backward compatibility
-    if "garch_model_description" in report_sections:
-        report_lines.append("## GARCH Model Description")
-        report_lines.append("")
-        report_lines.append("### GARCH(1,1) Model")
-        report_lines.append("")
-        report_lines.append("The GARCH(1,1) model specifies the conditional variance as:")
-        report_lines.append("")
-        report_lines.append("σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁")
-        report_lines.append("")
-        report_lines.append("Where:")
-        report_lines.append("- σ²ₜ is the conditional variance at time t")
-        report_lines.append("- ω is the constant term")
-        report_lines.append("- α captures the ARCH effect (lagged squared residuals)")
-        report_lines.append("- β captures the GARCH effect (lagged conditional variance)")
-        report_lines.append("- εₜ are the residuals")
-        report_lines.append("")
-        
-        if garch_settings:
-            report_lines.append("### Model Parameters")
-            report_lines.append("")
-            report_lines.append(f"- **GARCH Order (p):** {garch_settings.get('p', 1)}")
-            report_lines.append(f"- **ARCH Order (q):** {garch_settings.get('q', 1)}")
-            report_lines.append(f"- **Distribution:** {garch_settings.get('distribution', 'normal')}")
-            report_lines.append(f"- **Mean Model:** {'Zero' if not garch_settings.get('use_mean_model', False) else 'Constant/AR'}")
-            report_lines.append(f"- **Return Type:** {garch_settings.get('return_type', 'log')}")
-            report_lines.append("")
-    
-    # Volatility Forecast Method
-    if "volatility_forecast_method" in report_sections:
-        report_lines.append("## Volatility Forecast Method")
-        report_lines.append("")
-        report_lines.append("### Rolling Window GARCH Forecasting")
-        report_lines.append("")
-        report_lines.append("For each date in the evaluation period:")
-        report_lines.append("1. Fit GARCH(1,1) model to a rolling window of historical returns")
-        report_lines.append("2. Forecast conditional volatility for the next horizon periods")
-        report_lines.append("3. Use forecasted volatility to compute VaR and CVaR")
-        report_lines.append("")
-        
-        if garch_settings:
-            report_lines.append("### Forecast Settings")
-            report_lines.append("")
-            report_lines.append(f"- **Forecast Method:** {garch_settings.get('forecast_method', 'rolling')}")
-            report_lines.append(f"- **Estimation Windows:** {garch_settings.get('estimation_windows', [])} days")
-            report_lines.append(f"- **Forecast Horizons:** {garch_settings.get('horizons', [])} days")
-            report_lines.append(f"- **Fallback to Long-Run Variance:** {garch_settings.get('fallback_long_run_variance', True)}")
-            report_lines.append("")
-    
-    # VaR/CVaR Derivation from GARCH
-    if "var_cvar_derivation_from_garch" in report_sections:
-        report_lines.append("## VaR/CVaR Derivation from GARCH")
-        report_lines.append("")
-        report_lines.append("### From Volatility to Risk Measures")
-        report_lines.append("")
-        report_lines.append("**VaR Calculation:**")
-        report_lines.append("- VaR = σₜ₊ₕ · z_α · √h")
-        report_lines.append("- Where σₜ₊ₕ is the forecasted volatility, z_α is the quantile from the assumed distribution, and h is the horizon")
-        report_lines.append("")
-        report_lines.append("**CVaR Calculation:**")
-        report_lines.append("- CVaR = σₜ₊ₕ · ES_α · √h")
-        report_lines.append("- Where ES_α is the Expected Shortfall factor for the assumed distribution")
-        report_lines.append("")
-        report_lines.append("**Distribution Assumptions:**")
-        dist = garch_settings.get('distribution', 'normal') if garch_settings else 'normal'
-        if dist == 'normal':
-            report_lines.append("- Normal distribution: VaR and CVaR computed using standard normal quantiles")
-        elif dist == 't':
-            report_lines.append("- t-distribution: VaR and CVaR computed using Student-t quantiles (better for fat tails)")
-        report_lines.append("")
-        
-        if garch_settings:
-            report_lines.append(f"- **Confidence Levels:** {garch_settings.get('confidence_levels', [])}")
-            report_lines.append("")
-    
-    
-    # Batch Execution Summary
-    if "batch_execution_summary" in report_sections:
-        report_lines.append("## Batch Execution Summary")
-        report_lines.append("")
-        report_lines.append(f"- **Total Portfolio-Configuration Combinations:** {len(metrics_df)}")
-        if 'portfolio_id' in metrics_df.columns:
-            unique_portfolios = metrics_df['portfolio_id'].nunique()
-            report_lines.append(f"- **Unique Portfolios:** {unique_portfolios}")
-        report_lines.append("")
-    
-    # Aggregate Backtesting Results
-    if "aggregate_backtesting_results" in report_sections:
-        report_lines.append("## Backtesting Results")
-        report_lines.append("")
-        
-        if 'hit_rate' in metrics_df.columns:
-            avg_hit_rate = metrics_df['hit_rate'].mean()
-            report_lines.append(f"- **Average Hit Rate:** {avg_hit_rate:.4f}")
-            report_lines.append("")
-        
-        if 'violation_ratio' in metrics_df.columns:
-            avg_violation_ratio = metrics_df['violation_ratio'].mean()
-            report_lines.append(f"- **Average Violation Ratio:** {avg_violation_ratio:.4f}")
-            report_lines.append("  - Ratio > 1 indicates overestimation of risk")
-            report_lines.append("  - Ratio < 1 indicates underestimation of risk")
-            report_lines.append("")
-        
-        if 'traffic_light_zone' in metrics_df.columns:
-            zone_counts = metrics_df['traffic_light_zone'].value_counts()
-            report_lines.append("### Traffic Light Zones")
-            report_lines.append("")
-            for zone, count in zone_counts.items():
-                report_lines.append(f"- **{zone.capitalize()}:** {count} configurations ({count/len(metrics_df)*100:.1f}%)")
-            report_lines.append("")
-        
-        if 'kupiec_unconditional_coverage' in metrics_df.columns:
-            kupiec_passed = (metrics_df['kupiec_unconditional_coverage'] > 0.05).sum()
-            report_lines.append(f"- **Kupiec Test Passed:** {kupiec_passed}/{len(metrics_df)} configurations ({kupiec_passed/len(metrics_df)*100:.1f}%)")
-            report_lines.append("")
-    
-    # Tail Behavior Summary
-    if "tail_behavior_summary" in report_sections:
-        report_lines.append("## Tail Risk Analysis")
-        report_lines.append("")
-        
-        if 'mean_exceedance' in metrics_df.columns:
-            avg_mean_exceedance = metrics_df['mean_exceedance'].mean()
-            report_lines.append(f"- **Average Mean Exceedance (VaR):** {avg_mean_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'max_exceedance' in metrics_df.columns:
-            avg_max_exceedance = metrics_df['max_exceedance'].mean()
-            report_lines.append(f"- **Average Max Exceedance (VaR):** {avg_max_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'cvar_mean_exceedance' in metrics_df.columns:
-            avg_cvar_mean_exceedance = metrics_df['cvar_mean_exceedance'].mean()
-            report_lines.append(f"- **Average CVaR Mean Exceedance:** {avg_cvar_mean_exceedance:.6f}")
-            report_lines.append("")
-        
-        if 'cvar_max_exceedance' in metrics_df.columns:
-            avg_cvar_max_exceedance = metrics_df['cvar_max_exceedance'].mean()
-            report_lines.append(f"- **Average CVaR Max Exceedance:** {avg_cvar_max_exceedance:.6f}")
-            report_lines.append("")
-    
-    # Portfolio Structure Effects
-    if "portfolio_structure_effects" in report_sections:
-        report_lines.append("## Portfolio Structure Effects")
-        report_lines.append("")
-        
-        if 'num_active_assets' in metrics_df.columns:
-            avg_active_assets = metrics_df['num_active_assets'].mean()
-            report_lines.append(f"- **Average Number of Active Assets:** {avg_active_assets:.2f}")
-            report_lines.append("")
-        
-        if 'hhi_concentration' in metrics_df.columns:
-            avg_hhi = metrics_df['hhi_concentration'].mean()
-            report_lines.append(f"- **Average HHI Concentration:** {avg_hhi:.4f}")
-            report_lines.append("")
-    
-    # Robustness and Normality Checks
-    if "robustness_and_normality_checks" in report_sections:
-        report_lines.append("## Robustness and Normality Checks")
-        report_lines.append("")
-        
-        if 'skewness' in metrics_df.columns:
-            avg_skewness = metrics_df['skewness'].mean()
-            report_lines.append(f"- **Average Skewness:** {avg_skewness:.4f}")
-            report_lines.append("")
-        
-        if 'kurtosis' in metrics_df.columns:
-            avg_kurtosis = metrics_df['kurtosis'].mean()
-            report_lines.append(f"- **Average Excess Kurtosis:** {avg_kurtosis:.4f}")
-            report_lines.append("")
-        
-        if 'jarque_bera_p_value' in metrics_df.columns:
-            normality_passed = (metrics_df['jarque_bera_p_value'] > 0.05).sum()
-            report_lines.append(f"- **Normality Tests Passed (Jarque-Bera):** {normality_passed}/{len(metrics_df)} configurations ({normality_passed/len(metrics_df)*100:.1f}%)")
-            report_lines.append("")
-    
-    # Runtime Statistics
-    if "runtime_statistics" in report_sections:
-        report_lines.append("## Computational Performance")
-        report_lines.append("")
-        
-        if 'garch_fitting_time_ms' in metrics_df.columns:
-            avg_fitting_time = metrics_df['garch_fitting_time_ms'].mean()
-            report_lines.append(f"- **Average GARCH Fitting Time per Configuration:** {avg_fitting_time:.2f} ms")
-            report_lines.append("")
-        
-        if 'forecast_time_ms' in metrics_df.columns:
-            avg_forecast_time = metrics_df['forecast_time_ms'].mean()
-            report_lines.append(f"- **Average Forecast Time per Configuration:** {avg_forecast_time:.2f} ms")
-            report_lines.append("")
-        
-        if 'runtime_per_portfolio_ms' in metrics_df.columns:
-            avg_runtime = metrics_df['runtime_per_portfolio_ms'].mean()
-            report_lines.append(f"- **Average Total Runtime per Portfolio:** {avg_runtime:.2f} ms")
-            report_lines.append("")
-    
-    # Key Insights
-    if "key_insights" in report_sections:
-        report_lines.append("## Key Insights")
-        report_lines.append("")
-        report_lines.append("### Findings")
-        report_lines.append("")
-        
-        if 'violation_ratio' in metrics_df.columns:
-            avg_vr = metrics_df['violation_ratio'].mean()
-            if avg_vr > 1.2:
-                report_lines.append("- **Risk Overestimation:** GARCH-based VaR tends to overestimate risk")
-            elif avg_vr < 0.8:
-                report_lines.append("- **Risk Underestimation:** GARCH-based VaR tends to underestimate risk")
-            else:
-                report_lines.append("- **Adequate Risk Estimation:** GARCH provides reasonable risk estimates")
-            report_lines.append("")
-        
-        report_lines.append("### Recommendations")
-        report_lines.append("")
-        report_lines.append("- GARCH models are well-suited for portfolios with volatility clustering")
-        report_lines.append("- Consider t-distribution for portfolios with fat-tailed returns")
-        report_lines.append("- Monitor portfolios in 'red' traffic light zone more closely")
-        report_lines.append("- Adjust estimation windows based on market regime")
-        report_lines.append("")
-    
-    # Detailed Metrics Table
-    report_lines.append("## Detailed Metrics")
-    report_lines.append("")
-    report_lines.append("### Summary Statistics by Metric")
-    report_lines.append("")
-    
-    numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
-    summary_stats = metrics_df[numeric_cols].describe()
-    
-    report_lines.append("```")
-    report_lines.append(summary_stats.to_string())
-    report_lines.append("```")
-    report_lines.append("")
-    
-    report_content = "\n".join(report_lines)
-    
-    # Save report
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(report_content)
-    
-    return report_content
 
+    lines: List[str] = []
+    lines.append("# GARCH(1,1) VaR/CVaR Evaluation Report")
+    lines.append("")
+    lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("")
+
+    if "model_configuration" in report_sections:
+        lines.append("## Model Configuration")
+        lines.append("")
+        lines.append("GARCH(1,1):  σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁")
+        lines.append("")
+        if garch_settings:
+            lines.append(f"- Distribution: {garch_settings.get('distribution', 't')}")
+            lines.append(f"- Estimation windows: {garch_settings.get('estimation_windows', [])}")
+            lines.append(f"- Confidence levels: {garch_settings.get('confidence_levels', [])}")
+            lines.append(f"- Horizons: {garch_settings.get('horizons', {})}")
+        lines.append("")
+
+    if "batch_execution_summary" in report_sections:
+        lines.append("## Evaluation Summary")
+        lines.append("")
+        lines.append(f"- Total configurations: {len(metrics_df)}")
+        if 'asset' in metrics_df.columns:
+            lines.append(f"- Unique assets: {metrics_df['asset'].nunique()}")
+        lines.append("")
+
+    if "aggregate_backtesting_results" in report_sections and len(metrics_df) > 0:
+        lines.append("## Backtesting Results")
+        lines.append("")
+        if 'hit_rate' in metrics_df.columns and 'confidence_level' in metrics_df.columns:
+            lines.append("### Hit Rate vs Expected")
+            lines.append("")
+            lines.append("| Confidence | Avg Hit Rate | Expected | Diff |")
+            lines.append("|---:|---:|---:|---:|")
+            for cl in sorted(metrics_df['confidence_level'].dropna().unique()):
+                sub = metrics_df[metrics_df['confidence_level'] == cl]
+                avg_hr = float(sub['hit_rate'].mean())
+                exp = float(1.0 - cl)
+                lines.append(f"| {cl:.0%} | {avg_hr:.4f} | {exp:.4f} | {avg_hr-exp:+.4f} |")
+            lines.append("")
+
+        if 'kupiec_unconditional_coverage' in metrics_df.columns:
+            passed = int((metrics_df['kupiec_unconditional_coverage'] > 0.05).sum())
+            lines.append(f"- Kupiec UC passed: {passed}/{len(metrics_df)} ({passed/len(metrics_df)*100:.1f}%)")
+
+        if 'christoffersen_conditional_coverage' in metrics_df.columns:
+            passed = int((metrics_df['christoffersen_conditional_coverage'] > 0.05).sum())
+            lines.append(f"- Christoffersen CC passed: {passed}/{len(metrics_df)} ({passed/len(metrics_df)*100:.1f}%)")
+
+        if 'traffic_light_zone' in metrics_df.columns:
+            lines.append("")
+            lines.append("### Traffic Light Zones")
+            vc = metrics_df['traffic_light_zone'].value_counts(dropna=False)
+            for k, v in vc.items():
+                lines.append(f"- {k}: {int(v)}")
+            lines.append("")
+
+    if "tail_behavior_summary" in report_sections and len(metrics_df) > 0:
+        lines.append("## Tail Risk Summary")
+        lines.append("")
+        for col in ['quantile_loss_score', 'rmse_var_vs_losses', 'rmse_cvar_vs_losses']:
+            if col in metrics_df.columns:
+                lines.append(f"- {col}: mean={metrics_df[col].mean():.6f}, median={metrics_df[col].median():.6f}")
+        lines.append("")
+
+    if "garch_specification_and_estimation" in report_sections and len(metrics_df) > 0:
+        lines.append("## GARCH Parameter Diagnostics")
+        lines.append("")
+        if 'alpha_plus_beta' in metrics_df.columns:
+            apb = metrics_df['alpha_plus_beta']
+            lines.append(f"- α+β: mean={apb.mean():.4f}, median={apb.median():.4f}, min={apb.min():.4f}, max={apb.max():.4f}")
+        if 'persistence_half_life' in metrics_df.columns:
+            lines.append(f"- Half-life (days): mean={metrics_df['persistence_half_life'].mean():.2f}")
+        if 'long_run_volatility' in metrics_df.columns:
+            lines.append(f"- Long-run volatility: mean={metrics_df['long_run_volatility'].mean():.6f}")
+        lines.append("")
+
+    if "robustness_and_normality_checks" in report_sections and len(metrics_df) > 0:
+        lines.append("## Normality Diagnostics")
+        lines.append("")
+        for col in ['skewness', 'kurtosis', 'jarque_bera_p_value']:
+            if col in metrics_df.columns:
+                lines.append(f"- {col}: mean={metrics_df[col].mean():.4f}")
+        lines.append("")
+
+    if "time_sliced_backtesting" in report_sections and time_sliced_metrics_df is not None and len(time_sliced_metrics_df) > 0:
+        lines.append("## Time-Sliced Backtesting")
+        lines.append("")
+        if 'slice_type' in time_sliced_metrics_df.columns:
+            for st in sorted(time_sliced_metrics_df['slice_type'].unique()):
+                lines.append(f"### {st}")
+                sub = time_sliced_metrics_df[time_sliced_metrics_df['slice_type'] == st]
+                if 'hit_rate' in sub.columns:
+                    lines.append(f"- Avg hit rate: {sub['hit_rate'].mean():.4f}")
+                if 'violation_ratio' in sub.columns:
+                    lines.append(f"- Avg violation ratio: {sub['violation_ratio'].mean():.4f}")
+                lines.append("")
+
+    # Always include a numeric summary block
+    lines.append("## Detailed Numeric Summary")
+    lines.append("")
+    num = metrics_df.select_dtypes(include=[np.number])
+    if len(num.columns) > 0 and len(num) > 0:
+        lines.append("```")
+        lines.append(num.describe().to_string())
+        lines.append("```")
+    else:
+        lines.append("No numeric data available.")
+    lines.append("")
+
+    report = "\n".join(lines)
+
+    if output_path is not None:
+        p = Path(output_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(report, encoding='utf-8')
+
+    return report

@@ -1,78 +1,76 @@
 """
-Historical Value-at-Risk calculation module.
+Variance-Covariance Value-at-Risk calculation module.
 
-Implements rolling VaR calculation using the historical simulation method
-with empirical quantiles and linear interpolation.
+Implements rolling VaR calculation using the parametric Variance-Covariance method
+with normal distribution assumption:
+VaR = μ - z_α * σ * √(horizon)
+
+Where:
+- μ = mean return (sample mean)
+- σ = standard deviation (sample std)
+- z_α = z-score for confidence level α
+- horizon = time horizon in days
 """
 import pandas as pd
 import numpy as np
-from typing import Union, Optional, Tuple
+from typing import Union, Optional, Tuple, Dict, Any
 from scipy import stats
 
 
-def compute_historical_var(
-    returns: Union[pd.Series, np.ndarray],
+def compute_variance_covariance_var(
+    mean_return: float,
+    volatility: float,
     confidence_level: float = 0.95,
     horizon: int = 1,
     scaling_rule: str = 'sqrt_time',
-    quantile_method: str = 'empirical',
-    interpolation: str = 'linear'
+    tail_side: str = 'left'
 ) -> float:
     """
-    Calculate Historical Value-at-Risk using empirical quantiles.
+    Calculate Variance-Covariance Value-at-Risk using normal distribution assumption.
+    
+    Standard formula for left-tail risk:
+    VaR = -μ + z_{1-α} * σ * √(horizon)
+    
+    Where:
+    - μ = mean return
+    - σ = standard deviation of returns
+    - z_{1-α} = (1-α) quantile of standard normal distribution (positive for α < 0.5)
+    - α = 1 - confidence_level (e.g., α = 0.05 for 95% VaR)
+    - horizon = time horizon in days
+    
+    For 95% VaR: z_{0.95} ≈ 1.645, so VaR = -μ + 1.645 * σ * √(h)
     
     Args:
-        returns: Array or Series of returns
+        mean_return: Mean return (μ)
+        volatility: Standard deviation of returns (σ)
         confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
         horizon: Time horizon in days
         scaling_rule: How to scale for horizon ('sqrt_time' or 'linear')
-        quantile_method: Method for quantile ('empirical')
-        interpolation: Interpolation method ('linear', 'lower', 'higher', 'midpoint', 'nearest')
+        tail_side: 'left' for left-tail risk (default)
         
     Returns:
         VaR value (positive number representing potential loss)
     """
-    if isinstance(returns, pd.Series):
-        returns_array = returns.dropna().values
-    else:
-        returns_array = np.array(returns)
-        returns_array = returns_array[~np.isnan(returns_array)]
-    
-    if len(returns_array) == 0:
+    if volatility <= 0:
         return np.nan
     
-    # Compute quantile level (left tail)
     alpha = 1 - confidence_level
-    quantile_level = alpha * 100  # Convert to percentile
     
-    # Compute empirical quantile
-    if quantile_method == 'empirical':
-        # Handle different NumPy versions for percentile calculation
-        # NumPy 1.22.0+ uses np.quantile with 'method' parameter
-        # NumPy 1.9.0-1.21.x uses np.percentile with 'interpolation' parameter
-        # Older NumPy uses np.percentile without interpolation parameter
-        
-        # First try np.quantile with method (NumPy 1.22.0+)
-        try:
-            interpolation_to_method = {
-                'linear': 'linear',
-                'lower': 'lower',
-                'higher': 'higher',
-                'midpoint': 'midpoint',
-                'nearest': 'nearest'
-            }
-            method = interpolation_to_method.get(interpolation, 'linear')
-            var_1day = -np.quantile(returns_array, quantile_level / 100.0, method=method)
-        except (TypeError, ValueError, AttributeError):
-            # Fallback to np.percentile with interpolation (NumPy 1.9.0-1.21.x)
-            try:
-                var_1day = -np.percentile(returns_array, quantile_level, interpolation=interpolation)
-            except TypeError:
-                # Fallback for very old NumPy: use default percentile
-                # Default behavior approximates 'linear' interpolation
-                var_1day = -np.percentile(returns_array, quantile_level)
+    # Get z-score for the quantile
+    if tail_side == 'left':
+        # For left tail: use z_{1-α} which is positive for α < 0.5
+        # e.g., for 95% VaR (α = 0.05), z_{0.95} ≈ 1.645
+        z_score = stats.norm.ppf(1 - alpha)
     else:
-        raise ValueError(f"Unknown quantile_method: {quantile_method}")
+        # For right tail: use z_α
+        z_score = stats.norm.ppf(alpha)
+    
+    # Compute 1-day VaR using standard formula: VaR = -μ + z_{1-α} * σ
+    # This ensures VaR is positive (loss magnitude) when μ is small or negative
+    var_1day = -mean_return + z_score * volatility
+    
+    # Ensure VaR is non-negative (representing a loss)
+    var_1day = max(0.0, var_1day)
     
     # Scale for horizon
     if horizon == 1:
@@ -88,125 +86,187 @@ def compute_historical_var(
         return float(var_1day * np.sqrt(horizon))
 
 
-def compute_rolling_historical_var(
-    portfolio_returns: pd.Series,
+def estimate_mean_volatility(
+    returns: Union[pd.Series, np.ndarray],
+    mean_estimator: str = 'sample_mean',
+    volatility_estimator: str = 'sample_std'
+) -> Tuple[float, float]:
+    """
+    Estimate mean and volatility from returns.
+    
+    Args:
+        returns: Array or Series of returns
+        mean_estimator: Method for mean estimation ('sample_mean')
+        volatility_estimator: Method for volatility estimation ('sample_std')
+        
+    Returns:
+        Tuple of (mean_return, volatility)
+    """
+    if isinstance(returns, pd.Series):
+        returns_array = returns.dropna().values
+    else:
+        returns_array = np.array(returns)
+        returns_array = returns_array[~np.isnan(returns_array)]
+    
+    if len(returns_array) == 0:
+        return np.nan, np.nan
+    
+    # Estimate mean
+    if mean_estimator == 'sample_mean':
+        mean_return = float(np.mean(returns_array))
+    else:
+        raise ValueError(f"Unknown mean_estimator: {mean_estimator}")
+    
+    # Estimate volatility
+    if volatility_estimator == 'sample_std':
+        # Sample standard deviation (ddof=1 for unbiased estimate)
+        volatility = float(np.std(returns_array, ddof=1))
+    elif volatility_estimator == 'population_std':
+        # Population standard deviation (ddof=0)
+        volatility = float(np.std(returns_array, ddof=0))
+    else:
+        raise ValueError(f"Unknown volatility_estimator: {volatility_estimator}")
+    
+    return mean_return, volatility
+
+
+def compute_rolling_variance_covariance_var(
+    asset_returns: pd.Series,
     window: int = 252,
     confidence_level: float = 0.95,
     horizon: int = 1,
     scaling_rule: str = 'sqrt_time',
-    quantile_method: str = 'empirical',
-    interpolation: str = 'linear',
+    mean_estimator: str = 'sample_mean',
+    volatility_estimator: str = 'sample_std',
+    tail_side: str = 'left',
     min_periods: Optional[int] = None,
-    use_vectorized: bool = True
+    step_size: int = 1
 ) -> pd.Series:
     """
-    Compute rolling Historical VaR using a rolling window.
+    Compute rolling Variance-Covariance VaR using a rolling window.
     
-    Uses vectorized operations when possible for better performance.
+    For each window position, estimates mean and volatility, then computes VaR
+    using the normal distribution assumption.
     
     Args:
-        portfolio_returns: Series of portfolio returns with dates as index
+        asset_returns: Series of asset returns with dates as index
         window: Rolling window size in days
         confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
         horizon: Time horizon in days
         scaling_rule: How to scale for horizon ('sqrt_time' or 'linear')
-        quantile_method: Method for quantile ('empirical')
-        interpolation: Interpolation method ('linear', 'lower', 'higher', 'midpoint', 'nearest')
+        mean_estimator: Method for mean estimation ('sample_mean')
+        volatility_estimator: Method for volatility estimation ('sample_std')
+        tail_side: 'left' for left-tail risk
         min_periods: Minimum number of periods required for calculation
-        use_vectorized: Whether to use vectorized rolling operations (faster)
+        step_size: Step size for rolling window (default: 1 for daily rolling)
         
     Returns:
         Series of rolling VaR values with dates as index
     """
     if min_periods is None:
-        min_periods = min(window, len(portfolio_returns))
+        min_periods = min(window, len(asset_returns))
     
-    # Compute quantile level (left tail)
-    alpha = 1 - confidence_level
-    quantile_level = alpha * 100  # Convert to percentile
+    # Initialize output series
+    rolling_var = pd.Series(index=asset_returns.index, dtype=float)
     
-    # Scale factor for horizon
-    if horizon == 1:
-        horizon_scale = 1.0
-    elif scaling_rule == 'sqrt_time':
-        horizon_scale = np.sqrt(horizon)
-    elif scaling_rule == 'linear':
-        horizon_scale = horizon
-    else:
-        horizon_scale = np.sqrt(horizon)
-    
-    if use_vectorized and len(portfolio_returns) > window:
-        # Use pandas rolling with custom quantile calculation for better performance
-        try:
-            # Convert interpolation to method for np.quantile
-            interpolation_to_method = {
-                'linear': 'linear',
-                'lower': 'lower',
-                'higher': 'higher',
-                'midpoint': 'midpoint',
-                'nearest': 'nearest'
-            }
-            method = interpolation_to_method.get(interpolation, 'linear')
-            
-            # Use pandas rolling quantile which is vectorized
-            def compute_var(series):
-                """Compute VaR for a window of returns."""
-                if len(series) < min_periods:
-                    return np.nan
-                try:
-                    # Try np.quantile with method (NumPy 1.22.0+)
-                    var_1day = -np.quantile(series.values, quantile_level / 100.0, method=method)
-                except (TypeError, ValueError, AttributeError):
-                    try:
-                        # Fallback to np.percentile with interpolation (NumPy 1.9.0-1.21.x)
-                        var_1day = -np.percentile(series.values, quantile_level, interpolation=interpolation)
-                    except TypeError:
-                        # Fallback for very old NumPy
-                        var_1day = -np.percentile(series.values, quantile_level)
-                
-                return float(var_1day * horizon_scale)
-            
-            # Use rolling apply with vectorized quantile
-            rolling_var = portfolio_returns.rolling(
-                window=window,
-                min_periods=min_periods
-            ).apply(compute_var, raw=False)
-            
-            return rolling_var
-            
-        except Exception:
-            # Fall back to loop-based approach if vectorized fails
-            pass
-    
-    # Loop-based approach (fallback or when use_vectorized=False)
-    rolling_var = pd.Series(index=portfolio_returns.index, dtype=float)
-    
-    for i in range(len(portfolio_returns)):
+    # Compute rolling mean and volatility, then VaR
+    for i in range(0, len(asset_returns), step_size):
+        date = asset_returns.index[i]
+        
         if i < min_periods - 1:
-            rolling_var.iloc[i] = np.nan
+            rolling_var.loc[date] = np.nan
             continue
         
         # Get window of returns
         start_idx = max(0, i - window + 1)
-        window_returns = portfolio_returns.iloc[start_idx:i+1]
+        window_returns = asset_returns.iloc[start_idx:i+1]
         
         if len(window_returns) < min_periods:
-            rolling_var.iloc[i] = np.nan
+            rolling_var.loc[date] = np.nan
             continue
         
-        # Calculate Historical VaR for this window
-        var_value = compute_historical_var(
+        # Estimate mean and volatility
+        mean_return, volatility = estimate_mean_volatility(
             window_returns,
+            mean_estimator=mean_estimator,
+            volatility_estimator=volatility_estimator
+        )
+        
+        if np.isnan(mean_return) or np.isnan(volatility) or volatility <= 0:
+            rolling_var.loc[date] = np.nan
+            continue
+        
+        # Calculate Variance-Covariance VaR for this window
+        var_value = compute_variance_covariance_var(
+            mean_return,
+            volatility,
             confidence_level=confidence_level,
             horizon=horizon,
             scaling_rule=scaling_rule,
-            quantile_method=quantile_method,
-            interpolation=interpolation
+            tail_side=tail_side
         )
         
-        rolling_var.iloc[i] = var_value
+        rolling_var.loc[date] = var_value
     
     return rolling_var
+
+
+def compute_rolling_mean_volatility(
+    asset_returns: pd.Series,
+    window: int = 252,
+    mean_estimator: str = 'sample_mean',
+    volatility_estimator: str = 'sample_std',
+    min_periods: Optional[int] = None,
+    step_size: int = 1
+) -> Tuple[pd.Series, pd.Series]:
+    """
+    Compute rolling mean and volatility series.
+    
+    Args:
+        asset_returns: Series of asset returns with dates as index
+        window: Rolling window size in days
+        mean_estimator: Method for mean estimation ('sample_mean')
+        volatility_estimator: Method for volatility estimation ('sample_std')
+        min_periods: Minimum number of periods required for calculation
+        step_size: Step size for rolling window (default: 1)
+        
+    Returns:
+        Tuple of (rolling_mean_series, rolling_volatility_series)
+    """
+    if min_periods is None:
+        min_periods = min(window, len(asset_returns))
+    
+    rolling_mean = pd.Series(index=asset_returns.index, dtype=float)
+    rolling_volatility = pd.Series(index=asset_returns.index, dtype=float)
+    
+    for i in range(0, len(asset_returns), step_size):
+        date = asset_returns.index[i]
+        
+        if i < min_periods - 1:
+            rolling_mean.loc[date] = np.nan
+            rolling_volatility.loc[date] = np.nan
+            continue
+        
+        # Get window of returns
+        start_idx = max(0, i - window + 1)
+        window_returns = asset_returns.iloc[start_idx:i+1]
+        
+        if len(window_returns) < min_periods:
+            rolling_mean.loc[date] = np.nan
+            rolling_volatility.loc[date] = np.nan
+            continue
+        
+        # Estimate mean and volatility
+        mean_return, volatility = estimate_mean_volatility(
+            window_returns,
+            mean_estimator=mean_estimator,
+            volatility_estimator=volatility_estimator
+        )
+        
+        rolling_mean.loc[date] = mean_return
+        rolling_volatility.loc[date] = volatility
+    
+    return rolling_mean, rolling_volatility
 
 
 def align_returns_and_var(
@@ -227,7 +287,7 @@ def align_returns_and_var(
     common_dates = returns.index.intersection(var_series.index)
     
     if len(common_dates) == 0:
-        raise ValueError("No common dates between returns and VaR series")
+        return pd.Series(dtype=float), pd.Series(dtype=float)
     
     aligned_returns = returns.loc[common_dates]
     aligned_var = var_series.loc[common_dates]

@@ -1,19 +1,39 @@
 {
-  "task": "classical_var_evaluation_optimized",
+  "task": "variance_covariance_var_asset_level_evaluation",
 
   "design_principle": {
-    "estimation_scope": "asset_level",
-    "portfolio_projection": true,
-    "rationale": "Historical return distributions are constructed once at the asset level and reused across portfolio weight realizations via linear projection, ensuring scalability, statistical consistency, and bounded memory usage for large-scale portfolio simulations."
+    "model_scope": "asset_level_only",
+    "portfolio_projection": false,
+    "rationale": "Variance–Covariance VaR is estimated strictly per asset using rolling windows under the assumption of conditional normality. No portfolio aggregation or cross-asset covariance modeling is performed, ensuring methodological comparability with other single-asset risk models for IEEE Access–grade empirical evaluation."
   },
 
   "inputs": {
-    "panel_price_path": "data/processed/panel_price.parquet",
-    "portfolio_weights_path": "portfolios/portfolios.parquet"
+    "panel_price_path": "data/preprocessed/panel_price.parquet",
+    "asset_universe": {
+      "mode": "from_columns",
+      "include": null,
+      "exclude": null
+    }
   },
 
-  "var_settings": {
-    "method": "historical",
+  "data_settings": {
+    "return_type": "log",
+    "tail_side": "left",
+    "calendar": {
+      "sort_index": true,
+      "drop_duplicate_dates": true,
+      "timezone": null
+    },
+    "missing_data_policy": {
+      "dropna": "per_asset",
+      "min_required_observations": 800
+    }
+  },
+
+  "variance_covariance_settings": {
+    "distributional_assumption": "normal",
+    "mean_estimator": "sample_mean",
+    "volatility_estimator": "sample_std",
 
     "confidence_levels": [0.95, 0.99],
 
@@ -21,149 +41,136 @@
       "base_horizon": 1,
       "scaled_horizons": [10],
       "scaling_rule": "sqrt_time",
-      "assumptions": {
-        "iid_returns": true,
-        "note": "Square-root-of-time scaling is applied as a benchmark approximation; limitations are discussed relative to EVT and GARCH-based models."
-      }
+      "note": "VaR is scaled by the square-root-of-time rule; confidence levels remain unchanged across horizons."
     },
 
-    "estimation_windows": [252],
+    "estimation_windows": [252, 500],
 
-    "tail_side": "left",
-    "return_type": "log",
-
-    "loss_convention": {
-      "losses_positive": true,
-      "note": "Portfolio losses are defined as negative returns multiplied by -1 for VaR evaluation."
+    "rolling": {
+      "enabled": true,
+      "step_size": 1,
+      "warmup_policy": "skip_until_window_full",
+      "var_series_mode": "rolling_time_series"
     }
   },
 
   "computation_strategy": {
-    "compute_asset_returns_once": true,
-    "reuse_asset_return_matrix": true,
-    "disable_per_portfolio_return_recomputation": true,
+    "compute_daily_returns_once": true,
 
-    "projection_method": "linear",
-
-    "parallelization": {
-      "axis": ["estimation_window"],
-      "backend": "process",
-      "max_workers": "cpu_count_minus_one",
-      "cpu_affinity": true,
-      "enable_window_parallel": true,
-      "enable_portfolio_parallel": true,
-      "chunk_size": 10,
-      "note": "Window-level parallelization processes multiple estimation windows in parallel. Portfolio-level parallelization processes multiple portfolios within each batch in parallel. Chunk size controls batching for parallel portfolio processing."
+    "rolling_engine": {
+      "vectorization": "per_asset_loop",
+      "parallelization_axis": ["asset"],
+      "max_workers": "auto",
+      "chunk_assets": 1
     },
 
-    "memory_management": {
-      "max_memory_fraction": 0.75,
-      "enable_chunked_execution": true,
-      "enable_explicit_gc": true,
-      "spill_intermediate_to_disk": true,
-      "intermediate_store_format": "parquet",
-      "flush_frequency_batches": 1
+    "cache": {
+      "enabled": true,
+      "scope": "per_asset_per_window_per_confidence_per_time_index",
+      "store_format": "parquet",
+      "parameter_store_path": "cache/varcov_asset_parameters.parquet",
+      "key_fields": [
+        "asset",
+        "date",
+        "estimation_window",
+        "confidence_level",
+        "horizon",
+        "return_type",
+        "distributional_assumption"
+      ],
+      "write_mode": "append_or_upsert",
+      "cache_hit_ratio_metric": true
     },
 
-    "batching": {
-      "portfolios_batch_size": 500,
-      "adaptive_batching": true,
-      "note": "Batch size is dynamically reduced if memory pressure exceeds safe thresholds."
+    "runtime_instrumentation": {
+      "enabled": true,
+      "measure": [
+        "total_runtime_ms",
+        "returns_compute_time_ms",
+        "mean_estimation_time_ms",
+        "volatility_estimation_time_ms",
+        "var_compute_time_ms",
+        "backtesting_time_ms",
+        "time_slicing_time_ms"
+      ]
+    },
+
+    "safety_checks": {
+      "enabled": true,
+      "checks": [
+        {
+          "name": "volatility_positive",
+          "rule": "sigma > 0",
+          "on_fail": "skip_timestamp"
+        },
+        {
+          "name": "var_positive",
+          "rule": "VaR > 0",
+          "on_fail": "skip_timestamp"
+        },
+        {
+          "name": "expected_hit_rate_sanity",
+          "rule": "abs(hit_rate - (1 - confidence_level)) <= 5 * (1 - confidence_level)",
+          "on_fail": "flag_and_continue"
+        }
+      ]
     }
   },
 
-  "modules": {
-    "compute_daily_returns": true,
-
-    "construct_asset_return_matrix": {
-      "enabled": true,
-      "output_shape": "[num_days, num_assets]",
-      "storage": {
-        "format": "parquet",
-        "path": "cache/historical_asset_returns.parquet"
-      }
-    },
-
-    "portfolio_return_projection": {
-      "enabled": true,
-      "formula": "R_p(t) = W^T R_assets(t)"
-    },
-
-    "historical_var": {
-      "enabled": true,
-      "quantile_method": "empirical",
-      "interpolation": "linear"
+  "evaluation": {
+    "scope": "per_asset",
+    "outputs_granularity": {
+      "series_level": true,
+      "summary_level": true,
+      "time_sliced_level": true
     },
 
     "backtesting": {
       "enabled": true,
-      "evaluation_mode": "rolling_out_of_sample",
-
       "tests": [
         "hit_rate",
         "violation_ratio",
         "kupiec_unconditional_coverage",
         "christoffersen_independence",
-        "christoffersen_conditional_coverage"
+        "christoffersen_conditional_coverage",
+        "traffic_light_zone"
       ],
-
-      "traffic_light": {
-        "enabled": true,
-        "method": "basel",
-        "alpha": 0.99,
-        "window_size_days": 250,
-        "note": "Traffic-light evaluation is reported only for the 99% VaR level in line with Basel guidance."
-      }
-    },
-
-    "tail_metrics": [
-      "mean_exceedance",
-      "max_exceedance",
-      "std_exceedance",
-      "quantile_loss_score",
-      "rmse_var_vs_losses"
-    ],
-
-    "portfolio_structure_metrics": {
-      "enabled": true,
-      "metrics": [
-        "num_active_assets",
-        "hhi_concentration",
-        "effective_number_of_assets",
-        "covariance_condition_number"
-      ],
-      "active_weight_threshold": 1e-06
-    },
-
-    "distribution_metrics": {
-      "enabled": true,
-      "metrics": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ]
+      "notes": "Backtesting is performed on aligned (returns, VaR) time series per asset."
     },
 
     "time_sliced_metrics": {
       "enabled": true,
-      "slice_by": "year",
-      "memory_note": "Computed sequentially per slice to avoid cross-period memory accumulation."
-    },
-
-    "runtime_metrics": true
+      "slice_by": ["year", "quarter", "month"],
+      "minimum_observations_per_slice": 60,
+      "metrics": [
+        "hit_rate",
+        "num_violations",
+        "expected_violations",
+        "violation_ratio"
+      ]
+    }
   },
 
-  "performance_metrics": {
+  "metrics": {
     "accuracy": [
       "hit_rate",
       "violation_ratio",
+      "num_violations",
+      "total_observations",
+      "expected_violations",
       "kupiec_unconditional_coverage",
+      "kupiec_test_statistic",
+      "kupiec_reject_null",
       "christoffersen_independence",
+      "christoffersen_independence_statistic",
+      "christoffersen_independence_reject_null",
       "christoffersen_conditional_coverage",
+      "christoffersen_conditional_coverage_statistic",
+      "christoffersen_conditional_coverage_reject_null",
       "traffic_light_zone"
     ],
 
-    "tail_behavior": [
+    "tail_behavior_var": [
       "mean_exceedance",
       "max_exceedance",
       "std_exceedance",
@@ -171,56 +178,92 @@
       "rmse_var_vs_losses"
     ],
 
-    "portfolio_structure": [
-      "num_active_assets",
-      "hhi_concentration",
-      "effective_number_of_assets",
-      "covariance_condition_number"
-    ],
-
     "distribution": [
+      "rolling_mean",
+      "rolling_volatility",
       "skewness",
       "kurtosis",
-      "jarque_bera_p_value"
+      "jarque_bera_p_value",
+      "jarque_bera_statistic"
     ],
 
     "runtime": [
-      "runtime_per_portfolio_ms",
+      "total_runtime_ms",
+      "runtime_per_asset_ms",
       "p95_runtime_ms",
-      "projection_time_ms"
+      "mean_runtime_ms",
+      "median_runtime_ms",
+      "min_runtime_ms",
+      "max_runtime_ms",
+      "mean_estimation_time_ms",
+      "volatility_estimation_time_ms",
+      "cache_hit_ratio"
     ]
   },
 
   "outputs": {
-    "metrics_table": {
+    "parameter_store": {
+      "path": "cache/varcov_asset_parameters.parquet",
+      "contents": [
+        "asset",
+        "date",
+        "estimation_window",
+        "rolling_mean",
+        "rolling_volatility",
+        "fit_success"
+      ]
+    },
+
+    "risk_series_store": {
+      "path": "results/classical_risk/varcov_asset_var_series.parquet",
       "format": "parquet",
-      "path": "results/classical_risk/var_metrics.parquet",
-      "partition_by": ["confidence_level", "horizon"],
-      "compression": "zstd"
+      "contents": [
+        "asset",
+        "date",
+        "confidence_level",
+        "horizon",
+        "estimation_window",
+        "VaR"
+      ]
     },
 
-    "metrics_schema": {
+    "metrics_table": {
+      "path": "results/classical_risk/varcov_asset_level_metrics.parquet",
+      "format": "parquet",
+      "row_granularity": "asset_x_confidence_x_horizon_x_window",
+      "notes": "Aggregated backtesting metrics over the full evaluation period per asset."
+    },
+
+    "time_sliced_metrics_table": {
+      "path": "results/classical_risk/varcov_asset_level_time_sliced_metrics.parquet",
+      "format": "parquet",
+      "row_granularity": "asset_x_slice_type_x_slice_value_x_confidence_x_horizon_x_window"
+    },
+
+    "results_scheme.json": {
+      "path": "results/classical_risk/varcov_asset_level_results_scheme.json",
       "format": "json",
-      "path": "results/classical_risk/var_metrics_schema.json",
-      "content": "column_names_dtypes_units_and_indexing"
+      "contents": "schema of all result parquet files and metrics"
     },
 
-    "summary_report": {
-      "format": "markdown",
-      "path": "results/classical_risk/var_report.md",
-      "include_tables": false,
-      "include_figures": true
+    "report": {
+      "path": "results/classical_risk/varcov_asset_level_report.md",
+      "include_sections": [
+        "methodology_overview",
+        "normality_assumption",
+        "rolling_mean_volatility_estimation",
+        "variance_covariance_var_construction",
+        "backtesting_results",
+        "time_sliced_backtesting",
+        "distributional_characteristics",
+        "computational_performance",
+        "key_insights"
+      ]
     }
   },
 
-  "reproducibility": {
-    "random_seed": 42,
-    "deterministic_projection": true,
-    "notes": "Portfolio weights are fixed ex-ante via Dirichlet sampling."
-  },
-
   "paper_usage_notes": {
-    "simulation_phase": "Asset-level historical return matrices with linear projection enable scalable evaluation across 100K+ portfolios.",
-    "paper_phase": "Comparisons with filtered historical simulation, EVT, and GARCH models are conducted on representative portfolio subsets."
+    "baseline_role": "Use this configuration as the classical parametric baseline against EVT, GARCH, and historical simulation models.",
+    "paper_phase": "Report comparative backtesting tables across EVT, GARCH, and Var-Cov VaR using identical asset sets, windows, horizons, and confidence levels to ensure methodological fairness."
   }
 }

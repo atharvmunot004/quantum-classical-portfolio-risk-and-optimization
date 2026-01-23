@@ -1,0 +1,330 @@
+{
+  "description": "EVT-POT (Extreme Value Theory - Peaks Over Threshold) VaR/CVaR metrics parquet schema",
+  "primary_key": [
+    "portfolio_id",
+    "confidence_level",
+    "horizon",
+    "estimation_window",
+    "threshold_quantile"
+  ],
+  "columns": [
+    {
+      "name": "portfolio_id",
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Portfolio identifier"
+    },
+    {
+      "name": "confidence_level",
+      "dtype": "float64",
+      "nullable": false,
+      "description": "VaR/CVaR confidence level (e.g., 0.99 for 99%)"
+    },
+    {
+      "name": "horizon",
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Time horizon in days"
+    },
+    {
+      "name": "estimation_window",
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Estimation window size in days"
+    },
+    {
+      "name": "threshold_quantile",
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Threshold quantile used for Peaks Over Threshold (e.g., 0.95)"
+    },
+    {
+      "name": "var_runtime_ms",
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Runtime for VaR/CVaR computation in milliseconds"
+    },
+    {
+      "name": "evt_fitting_time_ms",
+      "dtype": "float64",
+      "nullable": false,
+      "description": "EVT fitting time in milliseconds (0.0 for asset-level fitting)"
+    },
+    {
+      "name": "threshold_selection_time_ms",
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Threshold selection time in milliseconds (0.0 for asset-level fitting)"
+    },
+    {
+      "name": "hit_rate",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Proportion of VaR violations (actual violations / total observations)"
+    },
+    {
+      "name": "violation_ratio",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Ratio of actual violations to expected violations"
+    },
+    {
+      "name": "kupiec_unconditional_coverage",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Kupiec unconditional coverage test p-value"
+    },
+    {
+      "name": "kupiec_test_statistic",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Kupiec unconditional coverage test statistic"
+    },
+    {
+      "name": "kupiec_reject_null",
+      "dtype": "bool",
+      "nullable": true,
+      "description": "Whether Kupiec test rejects null hypothesis (VaR model is correct)"
+    },
+    {
+      "name": "christoffersen_independence",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Christoffersen independence test p-value"
+    },
+    {
+      "name": "christoffersen_independence_statistic",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Christoffersen independence test statistic"
+    },
+    {
+      "name": "christoffersen_independence_reject_null",
+      "dtype": "bool",
+      "nullable": true,
+      "description": "Whether Christoffersen independence test rejects null hypothesis"
+    },
+    {
+      "name": "christoffersen_conditional_coverage",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Christoffersen conditional coverage test p-value"
+    },
+    {
+      "name": "christoffersen_conditional_coverage_statistic",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Christoffersen conditional coverage test statistic"
+    },
+    {
+      "name": "christoffersen_conditional_coverage_reject_null",
+      "dtype": "bool",
+      "nullable": true,
+      "description": "Whether Christoffersen conditional coverage test rejects null hypothesis"
+    },
+    {
+      "name": "traffic_light_zone",
+      "dtype": "object",
+      "nullable": true,
+      "description": "Basel traffic light zone (green/yellow/red) based on violation frequency"
+    },
+    {
+      "name": "num_violations",
+      "dtype": "int64",
+      "nullable": true,
+      "description": "Number of VaR violations observed"
+    },
+    {
+      "name": "total_observations",
+      "dtype": "int64",
+      "nullable": true,
+      "description": "Total number of observations in backtesting period"
+    },
+    {
+      "name": "expected_violations",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Expected number of violations based on confidence level"
+    },
+    {
+      "name": "mean_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Mean exceedance beyond VaR threshold"
+    },
+    {
+      "name": "max_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Maximum exceedance beyond VaR threshold"
+    },
+    {
+      "name": "std_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Standard deviation of exceedances beyond VaR threshold"
+    },
+    {
+      "name": "quantile_loss_score",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Quantile loss (pinball loss) score for VaR"
+    },
+    {
+      "name": "rmse_var_vs_losses",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Root mean squared error between VaR and actual losses (for violations only)"
+    },
+    {
+      "name": "cvar_mean_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Mean exceedance beyond CVaR threshold"
+    },
+    {
+      "name": "cvar_max_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Maximum exceedance beyond CVaR threshold"
+    },
+    {
+      "name": "cvar_std_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Standard deviation of exceedances beyond CVaR threshold"
+    },
+    {
+      "name": "rmse_cvar_vs_losses",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Root mean squared error between CVaR and actual losses (for violations only)"
+    },
+    {
+      "name": "expected_shortfall_exceedance",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Expected shortfall exceedance (mean exceedance beyond VaR)"
+    },
+    {
+      "name": "tail_index_xi",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "GPD shape parameter (tail index) - average across portfolio assets"
+    },
+    {
+      "name": "scale_beta",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "GPD scale parameter - average across portfolio assets"
+    },
+    {
+      "name": "shape_scale_stability",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Shape-scale stability metric (coefficient of variation of exceedances)"
+    },
+    {
+      "name": "portfolio_size",
+      "dtype": "int64",
+      "nullable": true,
+      "description": "Number of active assets in portfolio (non-zero weights)"
+    },
+    {
+      "name": "num_active_assets",
+      "dtype": "int64",
+      "nullable": true,
+      "description": "Number of active assets in portfolio (non-zero weights)"
+    },
+    {
+      "name": "hhi_concentration",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Herfindahl-Hirschman Index (concentration measure, sum of squared weights)"
+    },
+    {
+      "name": "effective_number_of_assets",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Effective number of assets (inverse of HHI)"
+    },
+    {
+      "name": "covariance_condition_number",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Condition number of covariance matrix (ratio of largest to smallest eigenvalue)"
+    },
+    {
+      "name": "skewness",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Skewness of portfolio returns distribution"
+    },
+    {
+      "name": "kurtosis",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Excess kurtosis of portfolio returns distribution"
+    },
+    {
+      "name": "jarque_bera_p_value",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Jarque-Bera normality test p-value"
+    },
+    {
+      "name": "jarque_bera_statistic",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Jarque-Bera normality test statistic"
+    },
+    {
+      "name": "runtime_per_portfolio_ms",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Mean runtime per portfolio in milliseconds"
+    },
+    {
+      "name": "p95_runtime_ms",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "95th percentile runtime in milliseconds"
+    },
+    {
+      "name": "mean_runtime_ms",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Mean runtime in milliseconds"
+    },
+    {
+      "name": "median_runtime_ms",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Median runtime in milliseconds"
+    },
+    {
+      "name": "min_runtime_ms",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Minimum runtime in milliseconds"
+    },
+    {
+      "name": "max_runtime_ms",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Maximum runtime in milliseconds"
+    },
+    {
+      "name": "cache_hit_ratio",
+      "dtype": "float64",
+      "nullable": true,
+      "description": "EVT parameter cache hit ratio (if caching enabled)"
+    }
+  ],
+  "metadata": {
+    "method": "EVT-POT (Extreme Value Theory - Peaks Over Threshold)",
+    "distribution": "Generalized Pareto Distribution (GPD)",
+    "fitting_strategy": "Asset-level EVT fitting with portfolio projection",
+    "note": "This schema describes the structure of results/classical_risk/@evt_pot_var_cvar_metrics.parquet"
+  }
+}

@@ -1,12 +1,12 @@
 """
-Main evaluation script for EVT-POT VaR and CVaR.
+Main evaluation script for EVT-POT VaR and CVaR at asset level.
 
 Orchestrates the entire VaR/CVaR evaluation pipeline with asset-level EVT fitting:
-- Data loading
-- Asset-level EVT parameter estimation (with caching)
-- Portfolio tail projection
-- Backtesting
-- Metrics computation
+- Data loading and preprocessing
+- Asset-level EVT parameter estimation with rolling windows (with caching)
+- Rolling VaR/CVaR time series computation
+- Backtesting per asset
+- Time-sliced metrics computation
 - Report generation
 """
 import pandas as pd
@@ -16,35 +16,30 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Tuple, Any
 import time
 from datetime import datetime
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Manager
 from functools import partial
 import warnings
+from threading import Lock
 
 # Suppress RuntimeWarning about module import in multiprocessing workers
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*found in sys.modules.*')
 
 from .returns import (
     load_panel_prices,
-    load_portfolio_weights,
     compute_daily_returns,
-    compute_portfolio_returns
+    compute_losses_from_returns
 )
 from .evt_calculator import (
-    compute_all_asset_evt_parameters,
+    compute_rolling_asset_evt_parameters,
     EVTParameterCache,
     compute_var_from_evt,
     compute_cvar_from_evt
-)
-from .portfolio_projection import (
-    project_portfolio_var_cvar,
-    compute_rolling_portfolio_var_cvar
 )
 from .backtesting import compute_accuracy_metrics, detect_cvar_violations
 from .metrics import (
     compute_tail_metrics,
     compute_cvar_tail_metrics,
     compute_evt_tail_metrics,
-    compute_structure_metrics,
     compute_distribution_metrics,
     compute_runtime_metrics
 )
@@ -52,487 +47,262 @@ from .report_generator import generate_report
 from .time_sliced_metrics import compute_time_sliced_metrics
 
 
-def _restructure_results_by_portfolio(
-    all_results: List[Dict],
-    aligned_data_dict: Dict[int, Dict],
-    prices: pd.DataFrame
-) -> List[Dict]:
-    """
-    Restructure results grouped by portfolio.
-    
-    Args:
-        all_results: List of flat result dictionaries
-        aligned_data_dict: Dictionary mapping portfolio_id to aligned data
-        prices: Original price DataFrame for date range
-        
-    Returns:
-        List of portfolio result dictionaries with nested structure
-    """
-    # Group results by portfolio_id
-    portfolios_dict = {}
-    
-    for result in all_results:
-        portfolio_id = result['portfolio_id']
-        
-        if portfolio_id not in portfolios_dict:
-            portfolios_dict[portfolio_id] = {
-                'portfolio_id': portfolio_id,
-                'structure': {
-                    'portfolio_size': result.get('portfolio_size', result.get('num_active_assets', 0)),
-                    'num_active_assets': result.get('num_active_assets', result.get('portfolio_size', 0)),
-                    'hhi': result.get('hhi_concentration', np.nan),
-                    'effective_assets': result.get('effective_number_of_assets', np.nan),
-                    'covariance_condition_number': result.get('covariance_condition_number', np.nan)
-                },
-                'distribution': {
-                    'skewness': result.get('skewness', np.nan),
-                    'kurtosis': result.get('kurtosis', np.nan),
-                    'jarque_bera_p_value': result.get('jarque_bera_p_value', np.nan),
-                    'jarque_bera_statistic': result.get('jarque_bera_statistic', np.nan)
-                },
-                'var_evaluations': []
-            }
-        
-        # Create VaR/CVaR evaluation entry
-        var_eval = {
-            'confidence_level': result['confidence_level'],
-            'horizon': result['horizon'],
-            'estimation_window': result['estimation_window'],
-            'global_metrics': {
-                'hit_rate': result.get('hit_rate', np.nan),
-                'num_violations': result.get('num_violations', 0),
-                'expected_violations': result.get('expected_violations', np.nan),
-                'violation_ratio': result.get('violation_ratio', np.nan),
-                'accuracy_tests': {
-                    'kupiec_p_value': result.get('kupiec_unconditional_coverage', np.nan),
-                    'kupiec_statistic': result.get('kupiec_test_statistic', np.nan),
-                    'kupiec_reject_null': result.get('kupiec_reject_null', False),
-                    'christoffersen_independence_p': result.get('christoffersen_independence', np.nan),
-                    'christoffersen_independence_statistic': result.get('christoffersen_independence_statistic', np.nan),
-                    'christoffersen_independence_reject': result.get('christoffersen_independence_reject_null', False),
-                    'christoffersen_cc_p': result.get('christoffersen_conditional_coverage', np.nan),
-                    'christoffersen_cc_statistic': result.get('christoffersen_conditional_coverage_statistic', np.nan),
-                    'christoffersen_cc_reject': result.get('christoffersen_conditional_coverage_reject_null', False),
-                    'traffic_light_zone': result.get('traffic_light_zone', 'unknown')
-                },
-                'tail_metrics': {
-                    'mean_exceedance': result.get('mean_exceedance', np.nan),
-                    'max_exceedance': result.get('max_exceedance', np.nan),
-                    'std_exceedance': result.get('std_exceedance', np.nan),
-                    'quantile_loss_score': result.get('quantile_loss_score', np.nan),
-                    'rmse_var_vs_losses': result.get('rmse_var_vs_losses', np.nan),
-                    'rmse_cvar_vs_losses': result.get('rmse_cvar_vs_losses', np.nan),
-                    'cvar_mean_exceedance': result.get('cvar_mean_exceedance', np.nan),
-                    'cvar_max_exceedance': result.get('cvar_max_exceedance', np.nan),
-                    'expected_shortfall_exceedance': result.get('expected_shortfall_exceedance', np.nan),
-                    'tail_index_xi': result.get('tail_index_xi', np.nan),
-                    'scale_beta': result.get('scale_beta', np.nan),
-                    'shape_scale_stability': result.get('shape_scale_stability', np.nan)
-                },
-                'runtime': {
-                    'runtime_ms': result.get('var_runtime_ms', np.nan),
-                    'evt_fitting_time_ms': result.get('evt_fitting_time_ms', np.nan),
-                    'threshold_selection_time_ms': result.get('threshold_selection_time_ms', np.nan),
-                    'p95_runtime_ms': result.get('p95_runtime_ms', np.nan),
-                    'median_runtime_ms': result.get('median_runtime_ms', np.nan),
-                    'cache_hit_ratio': result.get('cache_hit_ratio', np.nan)
-                }
-            },
-            'time_sliced_metrics': []
-        }
-        
-        # Add time-sliced metrics if available
-        if portfolio_id in aligned_data_dict:
-            aligned_data = aligned_data_dict[portfolio_id]
-            # Key must match the one used in _process_single_portfolio
-            threshold_quantile = result.get('threshold_quantile', 0.95)
-            key = f"{result['confidence_level']}_{result['horizon']}_{result['estimation_window']}_{threshold_quantile}"
-            if key in aligned_data:
-                time_slices = compute_time_sliced_metrics(
-                    aligned_data[key]['returns'],
-                    aligned_data[key]['var'],
-                    cvar_series=aligned_data[key].get('cvar'),
-                    confidence_level=result['confidence_level'],
-                    slice_by='year'
-                )
-                var_eval['time_sliced_metrics'] = time_slices
-        
-        portfolios_dict[portfolio_id]['var_evaluations'].append(var_eval)
-    
-    return list(portfolios_dict.values())
-
-
-def _save_restructured_json(
-    json_path: Path,
-    portfolio_results: List[Dict],
-    summary_stats: Dict,
-    data_period: str,
-    num_portfolios: int,
+def _process_single_asset_rolling(
+    asset_data: Tuple[str, pd.Series],
+    estimation_windows: List[int],
+    threshold_quantiles: List[float],
     confidence_levels: List[float],
     horizons: List[int],
-    estimation_windows: List[int],
-    evt_settings: Optional[Dict] = None
-):
-    """
-    Save results in the restructured JSON format.
-    
-    Args:
-        json_path: Path to save JSON file
-        portfolio_results: List of restructured portfolio results
-        summary_stats: Summary statistics dictionary
-        data_period: Data period string
-        num_portfolios: Number of portfolios evaluated
-        confidence_levels: List of confidence levels
-        horizons: List of horizons
-        estimation_windows: List of estimation windows
-        evt_settings: EVT model settings
-    """
-    # Convert NaN to None for JSON serialization
-    def clean_nan(obj):
-        if isinstance(obj, dict):
-            return {k: clean_nan(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [clean_nan(item) for item in obj]
-        elif isinstance(obj, (np.floating, float)) and np.isnan(obj):
-            return None
-        elif isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        else:
-            return obj
-    
-    output_data = {
-        'metadata': {
-            'task': 'evt_pot_var_cvar_evaluation_optimized',
-            'data_period': data_period,
-            'portfolios_evaluated': num_portfolios,
-            'confidence_levels': confidence_levels,
-            'horizons': horizons,
-            'estimation_windows': estimation_windows,
-            'evt_settings': evt_settings or {},
-            'generated_at': datetime.now().isoformat()
-        },
-        'portfolio_results': clean_nan(portfolio_results),
-        'summary': clean_nan(summary_stats)
-    }
-    
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False, default=str)
-
-
-def _compute_summary_statistics(
-    all_results: List[Dict],
-    runtimes: List[float],
-    cache_hit_ratio: float = 0.0
-) -> Dict:
-    """
-    Compute summary statistics across all portfolios.
-    
-    Args:
-        all_results: List of flat result dictionaries
-        runtimes: List of runtime values
-        cache_hit_ratio: Cache hit ratio
-        
-    Returns:
-        Dictionary with summary statistics
-    """
-    if len(all_results) == 0:
-        return {}
-    
-    results_df = pd.DataFrame(all_results)
-    
-    # Portfolio-level insights
-    portfolio_insights = {}
-    
-    # Average violation ratios by confidence level
-    for cl in [0.95, 0.99, 0.995]:
-        cl_results = results_df[results_df['confidence_level'] == cl]
-        if len(cl_results) > 0:
-            portfolio_insights[f'avg_violation_ratio_{int(cl*100)}'] = float(
-                cl_results['violation_ratio'].mean()
-            )
-    
-    # Traffic light zones
-    if 'traffic_light_zone' in results_df.columns:
-        zone_counts = results_df['traffic_light_zone'].value_counts()
-        total = len(results_df)
-        portfolio_insights['percent_red_zone'] = float(zone_counts.get('red', 0) / total) if total > 0 else 0.0
-        portfolio_insights['percent_yellow_zone'] = float(zone_counts.get('yellow', 0) / total) if total > 0 else 0.0
-        portfolio_insights['percent_green_zone'] = float(zone_counts.get('green', 0) / total) if total > 0 else 0.0
-    
-    # Distribution effects
-    distribution_effects = {}
-    if 'skewness' in results_df.columns:
-        distribution_effects['avg_skew'] = float(results_df['skewness'].mean())
-    if 'kurtosis' in results_df.columns:
-        distribution_effects['avg_kurtosis'] = float(results_df['kurtosis'].mean())
-    if 'jarque_bera_p_value' in results_df.columns:
-        rejection_rate = (results_df['jarque_bera_p_value'] < 0.05).mean()
-        distribution_effects['normality_rejection_rate'] = float(rejection_rate)
-    
-    # Structure effects
-    structure_effects = {}
-    if 'hhi_concentration' in results_df.columns and 'violation_ratio' in results_df.columns:
-        corr = results_df['hhi_concentration'].corr(results_df['violation_ratio'])
-        if not np.isnan(corr):
-            structure_effects['correlation_hhi_vs_violation_ratio'] = float(corr)
-    
-    # Runtime stats
-    runtime_stats = {}
-    if len(runtimes) > 0:
-        runtime_array = np.array(runtimes) * 1000  # Convert to ms
-        runtime_stats['mean_runtime_ms'] = float(np.mean(runtime_array))
-        runtime_stats['p95_runtime_ms'] = float(np.percentile(runtime_array, 95))
-        runtime_stats['median_runtime_ms'] = float(np.median(runtime_array))
-    
-    runtime_stats['cache_hit_ratio'] = float(cache_hit_ratio)
-    
-    # CVaR metrics summary
-    cvar_insights = {}
-    if 'cvar_mean_exceedance' in results_df.columns:
-        cvar_insights['avg_cvar_mean_exceedance'] = float(results_df['cvar_mean_exceedance'].mean())
-    if 'cvar_max_exceedance' in results_df.columns:
-        cvar_insights['avg_cvar_max_exceedance'] = float(results_df['cvar_max_exceedance'].mean())
-    
-    # EVT-specific metrics
-    evt_insights = {}
-    if 'tail_index_xi' in results_df.columns:
-        evt_insights['avg_tail_index_xi'] = float(results_df['tail_index_xi'].mean())
-        evt_insights['std_tail_index_xi'] = float(results_df['tail_index_xi'].std())
-    if 'expected_shortfall_exceedance' in results_df.columns:
-        evt_insights['avg_expected_shortfall_exceedance'] = float(results_df['expected_shortfall_exceedance'].mean())
-    
-    return {
-        'portfolio_level_insights': portfolio_insights,
-        'distribution_effects': distribution_effects,
-        'structure_effects': structure_effects,
-        'runtime_stats': runtime_stats,
-        'cvar_insights': cvar_insights,
-        'evt_insights': evt_insights
-    }
-
-
-def _process_single_portfolio(
-    portfolio_data: Tuple[int, Tuple, pd.Series],
-    daily_returns: pd.DataFrame,
-    asset_evt_parameters: Dict[Tuple[str, int, float], Dict[str, Any]],
-    confidence_levels: List[float],
-    horizons: List[int],
-    estimation_windows: List[int],
-    threshold_quantiles: list,
     scaling_rule: str,
-    aggregation_method: str,
-    compute_time_slices: bool = True
-) -> Tuple[List[Dict], float, Dict]:
+    min_exceedances: int,
+    xi_lower: float,
+    xi_upper: float,
+    gpd_fitting_method: str,
+    fallback_quantiles: Optional[List[float]],
+    cache: Optional[EVTParameterCache] = None,
+    cache_lock: Optional[Lock] = None,
+    safety_checks: Optional[Dict] = None
+) -> Tuple[List[Dict], List[Dict], Dict]:
     """
-    Process a single portfolio using asset-level EVT parameters.
+    Process a single asset with rolling windows to produce VaR/CVaR time series.
     
     Args:
-        portfolio_data: Tuple of (portfolio_idx, portfolio_id, portfolio_weights)
-        daily_returns: DataFrame of daily returns
-        asset_evt_parameters: Dictionary of asset-level EVT parameters
+        asset_data: Tuple of (asset_name, asset_losses_series)
+        estimation_windows: List of estimation window sizes
+        threshold_quantiles: List of threshold quantiles
         confidence_levels: List of confidence levels
         horizons: List of horizons
-        estimation_windows: List of estimation windows
-        threshold_quantiles: List of threshold quantiles
         scaling_rule: Scaling rule for horizon
-        aggregation_method: Aggregation method for portfolio projection
-        compute_time_slices: Whether to compute time-sliced metrics
+        min_exceedances: Minimum number of exceedances
+        xi_lower: Lower bound for shape parameter
+        xi_upper: Upper bound for shape parameter
+        gpd_fitting_method: GPD fitting method
+        return_type: Return type ('log' or 'simple')
+        tail_side: Tail side ('left' or 'right')
+        cache: Optional parameter cache
+        cache_lock: Optional lock for thread-safe cache access
+        safety_checks: Optional safety check configuration
         
     Returns:
-        Tuple of (list of result dictionaries, total runtime in seconds, 
-                 dict with aligned returns/VaR/CVaR for time slicing)
+        Tuple of (risk_series_list, metrics_list, runtime_dict)
     """
-    portfolio_idx, portfolio_id, portfolio_weights = portfolio_data
+    asset_name, asset_losses = asset_data
     
-    results = []
-    runtimes = []
-    aligned_data = {}
+    if len(asset_losses) < max(estimation_windows):
+        return [], [], {}
     
-    try:
-        # Compute portfolio returns for backtesting
-        portfolio_returns = compute_portfolio_returns(
-            daily_returns,
-            portfolio_weights,
-            align_assets=True
-        )
-    except Exception as e:
-        return results, 0.0, {}
+    risk_series_list = []
+    metrics_list = []
+    runtime_dict = {
+        'total_runtime_ms': 0.0,
+        'evt_fit_time_ms': 0.0,
+        'threshold_selection_time_ms': 0.0,
+        'var_compute_time_ms': 0.0,
+        'cvar_compute_time_ms': 0.0,
+        'backtesting_time_ms': 0.0
+    }
     
-    # Compute covariance matrix for structure metrics (once per portfolio)
-    try:
-        common_assets = daily_returns.columns.intersection(portfolio_weights.index)
-        returns_aligned = daily_returns[common_assets]
-        covariance_matrix = returns_aligned.cov()
-    except:
-        covariance_matrix = None
+    start_total = time.time()
     
-    # Evaluate for each combination of settings
-    for confidence_level in confidence_levels:
-        for horizon in horizons:
-            for window in estimation_windows:
-                for quantile in threshold_quantiles:
-                    try:
-                        start_time = time.time()
+    # Process each combination of window, quantile, confidence, horizon
+    for window in estimation_windows:
+        if len(asset_losses) < window:
+            continue
+            
+        for quantile in threshold_quantiles:
+            # Compute rolling EVT parameters and VaR/CVaR series
+            start_evt = time.time()
+            
+            try:
+                var_series, cvar_series, evt_params_series = compute_rolling_asset_evt_parameters(
+                    asset_losses,
+                    window,
+                    quantile,
+                    confidence_levels,
+                    horizons,
+                    scaling_rule,
+                    min_exceedances,
+                    xi_lower,
+                    xi_upper,
+                    gpd_fitting_method,
+                    fallback_quantiles=fallback_quantiles,
+                    cache=cache,
+                    cache_lock=cache_lock
+                )
+                
+                runtime_dict['evt_fit_time_ms'] += (time.time() - start_evt) * 1000
+                
+                if var_series is None:
+                    warnings.warn(f"No VaR series returned (None) for asset {asset_name}, window {window}, quantile {quantile}")
+                    continue
+                
+                if len(var_series) == 0:
+                    warnings.warn(f"Empty VaR series for asset {asset_name}, window {window}, quantile {quantile}")
+                    continue
+                
+                # Check if all values are NaN (all filtered by guardrails)
+                if var_series.isna().all().all():
+                    warnings.warn(f"All VaR values are NaN for asset {asset_name}, window {window}, quantile {quantile} - all values filtered by guardrails")
+                    continue
+                
+                # Create risk series records
+                for conf_level in confidence_levels:
+                    for horizon in horizons:
+                        var_key = f"var_{conf_level}_{horizon}"
+                        cvar_key = f"cvar_{conf_level}_{horizon}"
                         
-                        # Project portfolio VaR/CVaR from asset-level EVT parameters
-                        portfolio_var, portfolio_cvar, proj_diagnostics = project_portfolio_var_cvar(
-                            portfolio_weights,
-                            asset_evt_parameters,
-                            daily_returns,
-                            window,
-                            quantile,
-                            confidence_level,
-                            horizon,
-                            scaling_rule,
-                            aggregation_method
-                        )
-                        
-                        runtime = time.time() - start_time
-                        runtimes.append(runtime)
-                        
-                        if np.isnan(portfolio_var) or np.isnan(portfolio_cvar):
-                            continue
-                        
-                        # Create VaR/CVaR series for backtesting
-                        # For simplicity, use constant values (can be extended to rolling)
-                        var_series = pd.Series(
-                            [portfolio_var] * len(portfolio_returns),
-                            index=portfolio_returns.index
-                        )
-                        cvar_series = pd.Series(
-                            [portfolio_cvar] * len(portfolio_returns),
-                            index=portfolio_returns.index
-                        )
-                        
-                        # Align returns and VaR/CVaR
-                        aligned_returns = portfolio_returns
-                        aligned_var = var_series
-                        aligned_cvar = cvar_series
-                        
-                        if len(aligned_returns) == 0:
-                            continue
-                        
-                        # Store aligned data for time slicing
-                        if compute_time_slices:
-                            key = f"{confidence_level}_{horizon}_{window}_{quantile}"
-                            aligned_data[key] = {
-                                'returns': aligned_returns,
-                                'var': aligned_var,
-                                'cvar': aligned_cvar,
-                                'confidence_level': confidence_level
-                            }
-                        
-                        # Compute accuracy metrics
-                        accuracy_metrics = compute_accuracy_metrics(
-                            aligned_returns,
-                            aligned_var,
-                            confidence_level=confidence_level
-                        )
-                        
-                        # Compute tail metrics for VaR
-                        tail_metrics = compute_tail_metrics(
-                            aligned_returns,
-                            aligned_var,
-                            confidence_level=confidence_level
-                        )
-                        
-                        # Compute CVaR tail metrics
-                        cvar_tail_metrics = compute_cvar_tail_metrics(
-                            aligned_returns,
-                            aligned_cvar,
-                            aligned_var,
-                            confidence_level=confidence_level
-                        )
-                        
-                        # Compute EVT-specific metrics
-                        # Get representative asset parameters for metrics
-                        evt_tail_metrics = {
-                            'expected_shortfall_exceedance': np.nan,
-                            'tail_index_xi': np.nan,
-                            'scale_beta': np.nan,
-                            'shape_scale_stability': np.nan
-                        }
-                        
-                        # Try to get average tail index from assets in portfolio
-                        common_assets = portfolio_weights.index.intersection(daily_returns.columns)
-                        xi_values = []
-                        beta_values = []
-                        for asset in common_assets:
-                            key = (asset, window, quantile)
-                            if key in asset_evt_parameters:
-                                params = asset_evt_parameters[key]
-                                if params.get('success', False):
-                                    xi_values.append(params['xi'])
-                                    beta_values.append(params['beta'])
-                        
-                        if len(xi_values) > 0:
-                            evt_tail_metrics['tail_index_xi'] = np.mean(xi_values)
-                            evt_tail_metrics['scale_beta'] = np.mean(beta_values)
-                        
-                        # Compute structure metrics
-                        structure_metrics = compute_structure_metrics(
-                            portfolio_weights,
-                            covariance_matrix
-                        )
-                        
-                        # Compute distribution metrics
-                        distribution_metrics = compute_distribution_metrics(
-                            aligned_returns
-                        )
-                        
-                        # Combine all metrics
-                        result = {
-                            'portfolio_id': portfolio_id,
-                            'confidence_level': confidence_level,
-                            'horizon': horizon,
-                            'estimation_window': window,
-                            'threshold_quantile': quantile,
-                            'var_runtime_ms': runtime * 1000,
-                            'evt_fitting_time_ms': 0.0,  # Asset-level fitting done separately
-                            'threshold_selection_time_ms': 0.0,  # Done during asset-level fitting
-                            **accuracy_metrics,
-                            **tail_metrics,
-                            **cvar_tail_metrics,
-                            **evt_tail_metrics,
-                            **structure_metrics,
-                            **distribution_metrics
-                        }
-                        
-                        results.append(result)
-                        
-                    except Exception as e:
-                        continue
+                        if var_key in var_series.columns and cvar_key in cvar_series.columns:
+                            var_col = var_series[var_key]
+                            cvar_col = cvar_series[cvar_key]
+                            
+                            # Create risk series DataFrame
+                            for date in var_col.index:
+                                if pd.isna(var_col[date]) or pd.isna(cvar_col[date]):
+                                    continue
+                                
+                                # Safety check: VaR must be positive
+                                if safety_checks and safety_checks.get('enabled', False):
+                                    var_positive_check = safety_checks.get('checks', [])
+                                    for check in var_positive_check:
+                                        if check.get('name') == 'var_positive':
+                                            if var_col[date] <= 0:
+                                                continue  # Skip this timestamp
+                                
+                                risk_series_list.append({
+                                    'asset': asset_name,
+                                    'date': date,
+                                    'confidence_level': conf_level,
+                                    'horizon': horizon,
+                                    'estimation_window': window,
+                                    'threshold_quantile': quantile,
+                                    'VaR': float(var_col[date]),
+                                    'CVaR': float(cvar_col[date])
+                                })
+                            
+                            # Compute backtesting metrics for this configuration
+                            start_backtest = time.time()
+                            
+                            # Align losses with VaR/CVaR
+                            aligned_losses = asset_losses.loc[var_col.index]
+                            aligned_var = var_col
+                            aligned_cvar = cvar_col
+                            
+                            # Remove NaN values
+                            valid_mask = ~(pd.isna(aligned_losses) | pd.isna(aligned_var) | pd.isna(aligned_cvar))
+                            aligned_losses = aligned_losses[valid_mask]
+                            aligned_var = aligned_var[valid_mask]
+                            aligned_cvar = aligned_cvar[valid_mask]
+                            
+                            if len(aligned_losses) == 0:
+                                continue
+                            
+                            # Compute accuracy metrics using losses
+                            accuracy_metrics = compute_accuracy_metrics(
+                                aligned_losses,
+                                aligned_var,
+                                confidence_level=conf_level
+                            )
+                            
+                            # Compute tail metrics using losses
+                            tail_metrics = compute_tail_metrics(
+                                aligned_losses,
+                                aligned_var,
+                                confidence_level=conf_level
+                            )
+                            
+                            # Compute CVaR tail metrics using losses
+                            cvar_tail_metrics = compute_cvar_tail_metrics(
+                                aligned_losses,
+                                aligned_cvar,
+                                aligned_var,
+                                confidence_level=conf_level
+                            )
+                            
+                            # Compute distribution metrics (on returns, not losses)
+                            # Convert losses back to returns for distribution metrics
+                            aligned_returns = -aligned_losses
+                            distribution_metrics = compute_distribution_metrics(aligned_returns)
+                            
+                            # Compute EVT tail metrics using losses
+                            if len(evt_params_series) > 0 and evt_params_series[-1].get('success', False):
+                                latest_params = evt_params_series[-1]
+                                evt_tail_metrics = compute_evt_tail_metrics(
+                                    aligned_losses,
+                                    aligned_var,
+                                    latest_params.get('threshold', np.nan),
+                                    latest_params.get('xi', np.nan),
+                                    latest_params.get('beta', np.nan),
+                                    confidence_level=conf_level
+                                )
+                                # Add additional EVT parameters
+                                evt_tail_metrics['threshold'] = latest_params.get('threshold', np.nan)
+                                evt_tail_metrics['num_exceedances'] = latest_params.get('num_exceedances', 0)
+                                
+                                # Compute shape-scale stability from series
+                                if len(evt_params_series) > 1:
+                                    xi_values = [p.get('xi', np.nan) for p in evt_params_series if p.get('success', False) and not pd.isna(p.get('xi', np.nan))]
+                                    if len(xi_values) > 1:
+                                        evt_tail_metrics['shape_scale_stability'] = float(np.std(xi_values))
+                            else:
+                                evt_tail_metrics = {
+                                    'expected_shortfall_exceedance': np.nan,
+                                    'tail_index_xi': np.nan,
+                                    'scale_beta': np.nan,
+                                    'shape_scale_stability': np.nan,
+                                    'threshold': np.nan,
+                                    'num_exceedances': 0
+                                }
+                            
+                            # Remove the old evt_tail_metrics assignment that was here
+                            
+                            runtime_dict['backtesting_time_ms'] += (time.time() - start_backtest) * 1000
+                            
+                            # Combine all metrics
+                            metrics_list.append({
+                                'asset': asset_name,
+                                'confidence_level': conf_level,
+                                'horizon': horizon,
+                                'estimation_window': window,
+                                'threshold_quantile': quantile,
+                                **accuracy_metrics,
+                                **tail_metrics,
+                                **cvar_tail_metrics,
+                                **evt_tail_metrics,
+                                **distribution_metrics
+                            })
+                            
+            except Exception as e:
+                warnings.warn(f"Error processing asset {asset_name} with window {window}, quantile {quantile}: {e}")
+                continue
     
-    # Return total runtime per portfolio
-    total_runtime = sum(runtimes) if len(runtimes) > 0 else 0.0
+    runtime_dict['total_runtime_ms'] = (time.time() - start_total) * 1000
     
-    return results, total_runtime, aligned_data
+    return risk_series_list, metrics_list, runtime_dict
 
 
 def evaluate_evt_pot_var_cvar(
     config_path: Optional[Union[str, Path]] = None,
     config_dict: Optional[Dict] = None,
-    n_jobs: Optional[int] = None,
-    max_portfolios: Optional[int] = 100
-) -> pd.DataFrame:
+    n_jobs: Optional[int] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Main function to evaluate VaR and CVaR using EVT-POT methodology with asset-level fitting.
+    Main function to evaluate VaR and CVaR using EVT-POT methodology at asset level.
     
     This function implements the optimized workflow:
-    1. Fit EVT parameters at asset level (once per asset/window/quantile)
-    2. Reuse parameters across all portfolios
-    3. Project portfolio VaR/CVaR from asset-level parameters
+    1. Load and preprocess asset price data
+    2. Compute daily returns
+    3. For each asset, compute rolling EVT parameters and VaR/CVaR time series
+    4. Perform backtesting and compute metrics
+    5. Generate time-sliced metrics
+    6. Save results
     
     Args:
         config_path: Path to JSON configuration file
         config_dict: Configuration dictionary (if not loading from file)
-        n_jobs: Number of parallel workers (default: number of CPU cores)
-        max_portfolios: Maximum number of portfolios to process (default: 100, None for all)
+        n_jobs: Number of parallel workers (default: auto)
         
     Returns:
-        DataFrame with all computed metrics
+        Tuple of (risk_series_df, metrics_df, time_sliced_metrics_df)
     """
     # Load configuration
     if config_dict is None:
@@ -553,7 +323,6 @@ def evaluate_evt_pot_var_cvar(
     project_root = current_file.parent.parent.parent.parent
     
     panel_price_path = project_root / config['inputs']['panel_price_path']
-    portfolio_weights_path = project_root / config['inputs']['portfolio_weights_path']
     
     # Adjust path if it says "preprocessed" but file is in "processed"
     if not panel_price_path.exists() and 'preprocessed' in str(panel_price_path):
@@ -561,52 +330,101 @@ def evaluate_evt_pot_var_cvar(
     
     print("=" * 80)
     print("EVT-POT (EXTREME VALUE THEORY - PEAKS OVER THRESHOLD) VAR/CVAR EVALUATION")
-    print("Asset-Level EVT Fitting with Portfolio Projection")
+    print("Asset-Level Evaluation with Rolling Windows")
     print("=" * 80)
     print(f"\nLoading data...")
     print(f"  Panel prices: {panel_price_path}")
-    print(f"  Portfolio weights: {portfolio_weights_path}")
     
     # Load data
     prices = load_panel_prices(panel_price_path)
-    portfolio_weights_df = load_portfolio_weights(portfolio_weights_path)
     
     # Get data period
     data_period = f"{prices.index.min().strftime('%Y-%m-%d')} to {prices.index.max().strftime('%Y-%m-%d')}"
     
     print(f"\nLoaded:")
     print(f"  Prices: {len(prices)} dates, {len(prices.columns)} assets")
-    print(f"  Portfolios: {len(portfolio_weights_df)} portfolios")
     print(f"  Data period: {data_period}")
     
+    # Handle asset universe selection
+    asset_universe_config = config['inputs'].get('asset_universe', {})
+    if asset_universe_config.get('mode') == 'from_columns':
+        include_assets = asset_universe_config.get('include')
+        exclude_assets = asset_universe_config.get('exclude')
+        
+        if include_assets:
+            prices = prices[include_assets]
+        if exclude_assets:
+            prices = prices.drop(columns=exclude_assets)
+    
+    # Data settings
+    data_settings = config.get('data_settings', {})
+    return_type = data_settings.get('return_type', 'log')
+    tail_side = data_settings.get('tail_side', 'left')
+    min_required_obs = data_settings.get('missing_data_policy', {}).get('min_required_observations', 800)
+    
+    # Calendar settings
+    calendar_settings = data_settings.get('calendar', {})
+    if calendar_settings.get('sort_index', True):
+        prices = prices.sort_index()
+    if calendar_settings.get('drop_duplicate_dates', True):
+        prices = prices[~prices.index.duplicated(keep='first')]
+    
     # Compute daily returns
-    evt_settings = config.get('evt_settings', {})
-    return_type = evt_settings.get('return_type', 'log')
     print(f"\nComputing daily returns (method: {return_type})...")
     daily_returns = compute_daily_returns(prices, method=return_type)
-    print(f"  Daily returns: {len(daily_returns)} dates")
+    
+    # Filter assets with insufficient data
+    valid_assets = []
+    for asset in daily_returns.columns:
+        asset_returns = daily_returns[asset].dropna()
+        if len(asset_returns) >= min_required_obs:
+            valid_assets.append(asset)
+    
+    daily_returns = daily_returns[valid_assets]
+    print(f"  Daily returns: {len(daily_returns)} dates, {len(daily_returns.columns)} assets (after filtering)")
+    
+    # Compute explicit loss series: loss_t = -returns_t
+    print(f"\nComputing losses from returns...")
+    daily_losses = compute_losses_from_returns(daily_returns)
+    print(f"  Daily losses: {len(daily_losses)} dates, {len(daily_losses.columns)} assets")
     
     # Get EVT settings
-    confidence_levels = evt_settings.get('confidence_levels', [0.99])
+    evt_settings = config.get('evt_settings', {})
+    confidence_levels = evt_settings.get('confidence_levels', [0.95, 0.99])
     horizons_config = evt_settings.get('horizons', {})
     base_horizon = horizons_config.get('base_horizon', 1)
     scaled_horizons = horizons_config.get('scaled_horizons', [10])
     horizons = [base_horizon] + scaled_horizons
     scaling_rule = horizons_config.get('scaling_rule', 'sqrt_time')
-    estimation_windows = evt_settings.get('estimation_windows', [500])
+    estimation_windows = evt_settings.get('estimation_windows', [252, 500])
     threshold_settings = evt_settings.get('threshold_selection', {})
     threshold_quantiles = threshold_settings.get('quantiles', [0.95])
     min_exceedances = threshold_settings.get('min_exceedances', 50)
+    fallback_quantiles = threshold_settings.get('fallback_quantiles_if_insufficient', [0.9, 0.85, 0.8, 0.75, 0.7])
     shape_constraints = evt_settings.get('shape_constraints', {})
     xi_lower = shape_constraints.get('xi_lower_bound', -0.5)
     xi_upper = shape_constraints.get('xi_upper_bound', 0.5)
     gpd_fitting_method = evt_settings.get('gpd_fitting_method', 'pwm')
     
+    # Rolling settings
+    rolling_settings = evt_settings.get('rolling', {})
+    rolling_enabled = rolling_settings.get('enabled', True)
+    step_size = rolling_settings.get('step_size', 1)
+    
     # Get computation strategy
     computation_strategy = config.get('computation_strategy', {})
-    enable_cache = computation_strategy.get('enable_parameter_cache', True)
-    portfolio_projection = config.get('design_principle', {}).get('portfolio_projection', True)
-    aggregation_method = config.get('modules', {}).get('portfolio_tail_projection', {}).get('aggregation_method', 'weighted_tail_expectation')
+    enable_cache = computation_strategy.get('cache', {}).get('enabled', True)
+    parallelization_config = computation_strategy.get('rolling_engine', {})
+    max_workers_config = parallelization_config.get('max_workers', 'auto')
+    chunk_assets = parallelization_config.get('chunk_assets', 1)
+    safety_checks = computation_strategy.get('safety_checks', {})
+    
+    # Determine number of workers
+    if n_jobs is None:
+        if max_workers_config == 'auto':
+            n_jobs = max(1, cpu_count() - 1)  # Leave one core free
+        else:
+            n_jobs = int(max_workers_config)
     
     print(f"\nEVT-POT Settings:")
     print(f"  Method: {evt_settings.get('method', 'peaks_over_threshold')}")
@@ -618,197 +436,291 @@ def evaluate_evt_pot_var_cvar(
     print(f"  Confidence levels: {confidence_levels}")
     print(f"  Horizons: {horizons} days (scaling: {scaling_rule})")
     print(f"  Estimation windows: {estimation_windows} days")
-    print(f"  Asset-level EVT fitting: Enabled")
+    print(f"  Rolling windows: {'Enabled' if rolling_enabled else 'Disabled'}")
     print(f"  Parameter caching: {'Enabled' if enable_cache else 'Disabled'}")
-    print(f"  Portfolio projection: {'Enabled' if portfolio_projection else 'Disabled'}")
+    print(f"  Parallel workers: {n_jobs}")
     
     # Initialize parameter cache
     cache = None
+    cache_lock = None
+    manager = None
     if enable_cache:
         outputs = config.get('outputs', {})
-        cache_path = outputs.get('evt_parameter_store')
+        cache_path = outputs.get('parameter_store', {}).get('path')
         if cache_path:
             cache_path = project_root / cache_path
             cache = EVTParameterCache(cache_path)
+            # Create a manager and lock for process-safe cache access
+            # Note: In multiprocessing, each process has its own cache copy
+            # The lock helps with thread-safety if threading is used within processes
+            manager = Manager()
+            cache_lock = manager.Lock()
             print(f"  Cache path: {cache_path}")
     
-    # Step 1: Compute asset-level EVT parameters (once for all portfolios)
+    # Prepare asset data (using losses, not returns)
+    asset_data_list = [(asset, daily_losses[asset].dropna()) for asset in daily_losses.columns]
+    
     print(f"\n{'='*80}")
-    print("STEP 1: Computing Asset-Level EVT Parameters")
+    print("Processing Assets with Rolling EVT Estimation")
     print(f"{'='*80}")
-    print(f"  This step fits EVT parameters for each asset/window/quantile combination")
-    print(f"  Parameters will be reused across all portfolios for efficiency")
+    print(f"  Total assets: {len(asset_data_list)}")
+    print(f"  Parallel workers: {n_jobs}")
     
-    start_evt_time = time.time()
-    asset_evt_parameters = compute_all_asset_evt_parameters(
-        daily_returns,
-        estimation_windows,
-        threshold_quantiles,
-        min_exceedances,
-        xi_lower,
-        xi_upper,
-        cache=cache
-    )
-    evt_fitting_time = time.time() - start_evt_time
+    # Process assets
+    all_risk_series = []
+    all_metrics = []
+    all_runtimes = []
     
-    # Count successful fits
-    successful_fits = sum(1 for p in asset_evt_parameters.values() if p.get('success', False))
-    total_fits = len(asset_evt_parameters)
+    start_time_total = time.time()
     
-    print(f"\n  Asset-level EVT fitting completed:")
-    print(f"    Total parameter sets: {total_fits}")
-    print(f"    Successful fits: {successful_fits}")
-    print(f"    Fitting time: {evt_fitting_time:.2f} seconds")
-    if cache:
-        print(f"    Cache hit ratio: {cache.get_hit_ratio():.2%}")
+    if n_jobs > 1 and len(asset_data_list) > 1:
+        # Parallel processing
+        print(f"\n  Processing assets in parallel...")
+        
+        worker_func = partial(
+            _process_single_asset_rolling,
+            estimation_windows=estimation_windows,
+            threshold_quantiles=threshold_quantiles,
+            confidence_levels=confidence_levels,
+            horizons=horizons,
+            scaling_rule=scaling_rule,
+            min_exceedances=min_exceedances,
+            xi_lower=xi_lower,
+            xi_upper=xi_upper,
+            gpd_fitting_method=gpd_fitting_method,
+            fallback_quantiles=fallback_quantiles,
+            cache=cache,
+            cache_lock=cache_lock,
+            safety_checks=safety_checks
+        )
+        
+        try:
+            with Pool(processes=n_jobs) as pool:
+                results_iter = pool.imap(worker_func, asset_data_list, chunksize=chunk_assets)
+                
+                for idx, (risk_series, metrics, runtime) in enumerate(results_iter):
+                    all_risk_series.extend(risk_series)
+                    all_metrics.extend(metrics)
+                    all_runtimes.append(runtime)
+                    
+                    if (idx + 1) % 10 == 0 or (idx + 1) in [1, 5, 20, 50, 100]:
+                        print(f"  Processed {idx + 1}/{len(asset_data_list)} assets...", flush=True)
+        except Exception as e:
+            warnings.warn(f"Parallel processing failed: {e}. Falling back to sequential processing.")
+            # Fall back to sequential
+            for idx, asset_data in enumerate(asset_data_list):
+                risk_series, metrics, runtime = worker_func(asset_data)
+                all_risk_series.extend(risk_series)
+                all_metrics.extend(metrics)
+                all_runtimes.append(runtime)
+                
+                if (idx + 1) % 10 == 0:
+                    print(f"  Processed {idx + 1}/{len(asset_data_list)} assets...", flush=True)
+    else:
+        # Sequential processing
+        print(f"\n  Processing assets sequentially...")
+        for idx, asset_data in enumerate(asset_data_list):
+            risk_series, metrics, runtime = _process_single_asset_rolling(
+                asset_data,
+                estimation_windows,
+                threshold_quantiles,
+                confidence_levels,
+                horizons,
+                scaling_rule,
+                min_exceedances,
+                xi_lower,
+                xi_upper,
+                gpd_fitting_method,
+                fallback_quantiles,
+                cache=cache,
+                cache_lock=cache_lock,
+                safety_checks=safety_checks
+            )
+            all_risk_series.extend(risk_series)
+            all_metrics.extend(metrics)
+            all_runtimes.append(runtime)
+            
+            if (idx + 1) % 10 == 0:
+                print(f"  Processed {idx + 1}/{len(asset_data_list)} assets...", flush=True)
+    
+    total_runtime = time.time() - start_time_total
     
     # Save cache
     if cache:
         cache.save_cache()
+        cache_hit_ratio = cache.get_hit_ratio()
+        print(f"\n  Cache hit ratio: {cache_hit_ratio:.2%}")
     
-    # Step 2: Process portfolios using asset-level parameters
+    # Create DataFrames
+    if len(all_risk_series) == 0:
+        # Provide more helpful error message
+        print(f"\nWARNING: No risk series computed!")
+        print(f"  Total assets processed: {len(asset_data_list)}")
+        print(f"  Total metrics records: {len(all_metrics)}")
+        print(f"  This may indicate:")
+        print(f"    - VaR guardrails are too strict (VaR <= threshold)")
+        print(f"    - CVaR domain checks failing (xi >= 1)")
+        print(f"    - Insufficient exceedances for EVT fitting")
+        print(f"    - All computed VaR/CVaR values are invalid")
+        raise ValueError("No risk series computed. Check data and configuration. All VaR/CVaR values may have been filtered out by guardrails.")
+    
+    risk_series_df = pd.DataFrame(all_risk_series)
+    metrics_df = pd.DataFrame(all_metrics)
+    
+    # Runtime metrics should NOT be per-row (IEEE reviewers flag duplicated runtime columns)
+    # Store runtime metrics separately, not broadcast to every configuration row
+    runtime_metrics_dict = {}
+    if len(all_runtimes) > 0:
+        runtime_metrics_dict = compute_runtime_metrics([r.get('total_runtime_ms', 0) / 1000 for r in all_runtimes])
+        if cache:
+            runtime_metrics_dict['cache_hit_ratio'] = cache.get_hit_ratio()
+    
+    print(f"\nCompleted evaluation:")
+    print(f"  Total runtime: {total_runtime/60:.2f} minutes ({total_runtime:.2f} seconds)")
+    print(f"  Risk series records: {len(risk_series_df)}")
+    print(f"  Metrics records: {len(metrics_df)}")
+    
+    # Compute time-sliced metrics
     print(f"\n{'='*80}")
-    print("STEP 2: Processing Portfolios with Portfolio Projection")
+    print("Computing Time-Sliced Metrics")
     print(f"{'='*80}")
     
-    # Limit number of portfolios if specified
-    num_portfolios_total = len(portfolio_weights_df)
-    if max_portfolios is not None and max_portfolios > 0:
-        num_portfolios = min(num_portfolios_total, max_portfolios)
-        portfolio_weights_df = portfolio_weights_df.iloc[:num_portfolios]
-        print(f"  Limiting to first {num_portfolios:,} portfolios (out of {num_portfolios_total:,} total)")
+    time_sliced_config = config.get('evaluation', {}).get('time_sliced_metrics', {})
+    if time_sliced_config.get('enabled', True):
+        slice_by_list = time_sliced_config.get('slice_by', ['year', 'quarter', 'month'])
+        min_obs_per_slice = time_sliced_config.get('minimum_observations_per_slice', 60)
+        
+        all_time_sliced = []
+        
+        # Group risk series by asset and configuration
+        for asset in risk_series_df['asset'].unique():
+            asset_risk = risk_series_df[risk_series_df['asset'] == asset]
+            
+            for conf_level in confidence_levels:
+                for horizon in horizons:
+                    for window in estimation_windows:
+                        for quantile in threshold_quantiles:
+                            config_risk = asset_risk[
+                                (asset_risk['confidence_level'] == conf_level) &
+                                (asset_risk['horizon'] == horizon) &
+                                (asset_risk['estimation_window'] == window) &
+                                (asset_risk['threshold_quantile'] == quantile)
+                            ]
+                            
+                            if len(config_risk) == 0:
+                                continue
+                            
+                            # Get asset losses
+                            asset_losses = daily_losses[asset].dropna()
+                            
+                            # Create VaR/CVaR series
+                            var_series = pd.Series(
+                                config_risk.set_index('date')['VaR'],
+                                index=pd.to_datetime(config_risk['date'])
+                            )
+                            cvar_series = pd.Series(
+                                config_risk.set_index('date')['CVaR'],
+                                index=pd.to_datetime(config_risk['date'])
+                            )
+                            
+                            # Align losses
+                            common_dates = asset_losses.index.intersection(var_series.index)
+                            if len(common_dates) < min_obs_per_slice:
+                                continue
+                            
+                            aligned_losses = asset_losses.loc[common_dates]
+                            aligned_var = var_series.loc[common_dates]
+                            aligned_cvar = cvar_series.loc[common_dates]
+                            
+                            # Compute time-sliced metrics using losses
+                            for slice_by in slice_by_list:
+                                time_slices = compute_time_sliced_metrics(
+                                    aligned_losses,
+                                    aligned_var,
+                                    cvar_series=aligned_cvar,
+                                    confidence_level=conf_level,
+                                    slice_by=slice_by
+                                )
+                                
+                                for ts in time_slices:
+                                    ts['asset'] = asset
+                                    ts['confidence_level'] = conf_level
+                                    ts['horizon'] = horizon
+                                    ts['estimation_window'] = window
+                                    ts['threshold_quantile'] = quantile
+                                    ts['slice_type'] = slice_by
+                                    all_time_sliced.append(ts)
+        
+        time_sliced_metrics_df = pd.DataFrame(all_time_sliced)
+        print(f"  Time-sliced metrics records: {len(time_sliced_metrics_df)}")
     else:
-        num_portfolios = num_portfolios_total
-        print(f"  Processing all {num_portfolios:,} portfolios")
-    
-    # Calculate total combinations for progress tracking
-    total_combinations = num_portfolios * len(confidence_levels) * len(horizons) * len(estimation_windows) * len(threshold_quantiles)
-    print(f"  Total portfolio-configuration combinations: {total_combinations:,}")
-    
-    # Initialize results
-    all_results = []
-    runtimes = []
-    aligned_data_dict = {}
-    
-    # Process portfolios
-    print(f"\n  Processing portfolios...")
-    start_time_total = time.time()
-    
-    for portfolio_idx, (portfolio_id, portfolio_weights) in enumerate(portfolio_weights_df.iterrows()):
-        if (portfolio_idx + 1) % 100 == 0 or (portfolio_idx + 1) in [1, 10, 50, 500, 1000]:
-            print(f"  Processing portfolio {portfolio_idx + 1:,}/{num_portfolios:,} ({100*(portfolio_idx+1)/num_portfolios:.1f}%)...", flush=True)
-        
-        portfolio_data = (portfolio_idx, portfolio_id, portfolio_weights)
-        results, runtime, aligned_data = _process_single_portfolio(
-            portfolio_data,
-            daily_returns,
-            asset_evt_parameters,
-            confidence_levels,
-            horizons,
-            estimation_windows,
-            threshold_quantiles,
-            scaling_rule,
-            aggregation_method,
-            compute_time_slices=True
-        )
-        
-        all_results.extend(results)
-        runtimes.append(runtime)
-        if aligned_data:
-            aligned_data_dict[portfolio_id] = aligned_data
-    
-    total_runtime = time.time() - start_time_total
-    avg_runtime_per_portfolio = total_runtime / num_portfolios if num_portfolios > 0 else 0
-    
-    # Create results DataFrame
-    if len(all_results) == 0:
-        raise ValueError("No results computed. Check data and configuration.")
-    
-    results_df = pd.DataFrame(all_results)
-    
-    # Add runtime metrics
-    runtime_metrics = compute_runtime_metrics(runtimes)
-    for key, value in runtime_metrics.items():
-        results_df[key] = value
-    
-    # Add cache hit ratio if available
-    if cache:
-        results_df['cache_hit_ratio'] = cache.get_hit_ratio()
-    
-    # Restructure results by portfolio
-    portfolio_results = _restructure_results_by_portfolio(
-        all_results,
-        aligned_data_dict,
-        prices
-    )
-    
-    # Compute summary statistics
-    cache_hit_ratio = cache.get_hit_ratio() if cache else 0.0
-    summary_stats = _compute_summary_statistics(all_results, runtimes, cache_hit_ratio)
-    
-    print(f"\nCompleted evaluation of {len(results_df)} portfolio-configuration combinations")
-    print(f"  Total runtime: {total_runtime/60:.2f} minutes ({total_runtime:.2f} seconds)")
-    print(f"  EVT fitting time: {evt_fitting_time:.2f} seconds")
-    print(f"  Portfolio processing time: {total_runtime:.2f} seconds")
-    print(f"  Average runtime per portfolio: {avg_runtime_per_portfolio*1000:.2f} ms")
-    if cache:
-        print(f"  Cache hit ratio: {cache_hit_ratio:.2%}")
+        time_sliced_metrics_df = pd.DataFrame()
     
     # Save results
     outputs = config.get('outputs', {})
     
+    # Save risk series
+    if 'risk_series_store' in outputs:
+        risk_path = project_root / outputs['risk_series_store']['path']
+        risk_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\nSaving risk series...")
+        print(f"  Path: {risk_path}")
+        
+        if risk_path.suffix == '.parquet':
+            risk_series_df.to_parquet(risk_path, index=False)
+        else:
+            risk_path = risk_path.with_suffix('.parquet')
+            risk_series_df.to_parquet(risk_path, index=False)
+        
+        print(f"  Saved: {risk_path}")
+    
+    # Save metrics table
     if 'metrics_table' in outputs:
-        metrics_path = project_root / outputs['metrics_table']
+        metrics_path = project_root / outputs['metrics_table']['path']
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         
         print(f"\nSaving metrics table...")
         print(f"  Path: {metrics_path}")
         
         if metrics_path.suffix == '.parquet':
-            results_df.to_parquet(metrics_path, index=False)
-        elif metrics_path.suffix == '.csv':
-            results_df.to_csv(metrics_path, index=False)
+            metrics_df.to_parquet(metrics_path, index=False)
         else:
             metrics_path = metrics_path.with_suffix('.parquet')
-            results_df.to_parquet(metrics_path, index=False)
+            metrics_df.to_parquet(metrics_path, index=False)
         
         print(f"  Saved: {metrics_path}")
     
-    # Also save JSON if specified separately
-    if 'metrics_json' in outputs:
-        json_path = project_root / outputs['metrics_json']
-        json_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save time-sliced metrics
+    if 'time_sliced_metrics_table' in outputs and len(time_sliced_metrics_df) > 0:
+        time_sliced_path = project_root / outputs['time_sliced_metrics_table']['path']
+        time_sliced_path.parent.mkdir(parents=True, exist_ok=True)
         
-        print(f"\nSaving metrics JSON...")
-        print(f"  Path: {json_path}")
+        print(f"\nSaving time-sliced metrics...")
+        print(f"  Path: {time_sliced_path}")
         
-        _save_restructured_json(
-            json_path,
-            portfolio_results,
-            summary_stats,
-            data_period,
-            num_portfolios,
-            confidence_levels,
-            horizons,
-            estimation_windows,
-            evt_settings
-        )
+        if time_sliced_path.suffix == '.parquet':
+            time_sliced_metrics_df.to_parquet(time_sliced_path, index=False)
+        else:
+            time_sliced_path = time_sliced_path.with_suffix('.parquet')
+            time_sliced_metrics_df.to_parquet(time_sliced_path, index=False)
         
-        print(f"  Saved: {json_path}")
+        print(f"  Saved: {time_sliced_path}")
     
     # Generate report
-    if 'summary_report' in outputs:
-        report_path = project_root / outputs['summary_report']
+    if 'report' in outputs:
+        report_path = project_root / outputs['report']['path']
         report_path.parent.mkdir(parents=True, exist_ok=True)
         
         print(f"\nGenerating report...")
         print(f"  Path: {report_path}")
         
+        report_sections = outputs['report'].get('include_sections', [])
         generate_report(
-            results_df,
+            metrics_df,
             report_path,
             evt_settings=evt_settings,
-            report_sections=config.get('report_sections')
+            report_sections=report_sections
         )
         
         print(f"  Saved: {report_path}")
@@ -817,7 +729,7 @@ def evaluate_evt_pot_var_cvar(
     print("EVALUATION COMPLETE")
     print("=" * 80)
     
-    return results_df
+    return risk_series_df, metrics_df, time_sliced_metrics_df
 
 
 def main():
@@ -825,7 +737,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description='Evaluate EVT-POT VaR/CVaR for portfolios (asset-level EVT fitting)'
+        description='Evaluate EVT-POT VaR/CVaR at asset level with rolling windows'
     )
     parser.add_argument(
         '--config',
@@ -837,32 +749,24 @@ def main():
         '--n-jobs',
         type=int,
         default=None,
-        help='Number of parallel workers (not used in current implementation)'
-    )
-    parser.add_argument(
-        '--max-portfolios',
-        type=int,
-        default=100,
-        help='Maximum number of portfolios to process (default: 100, use 0 to process all)'
+        help='Number of parallel workers (default: auto)'
     )
     
     args = parser.parse_args()
     
-    max_portfolios = args.max_portfolios
-    if max_portfolios == 0:
-        max_portfolios = None
-    
-    results_df = evaluate_evt_pot_var_cvar(
+    risk_series_df, metrics_df, time_sliced_metrics_df = evaluate_evt_pot_var_cvar(
         config_path=args.config,
-        n_jobs=args.n_jobs,
-        max_portfolios=max_portfolios
+        n_jobs=args.n_jobs
     )
     
     print(f"\nResults summary:")
-    print(f"  Total rows: {len(results_df)}")
-    print(f"  Columns: {len(results_df.columns)}")
-    print(f"\nFirst few rows:")
-    print(results_df.head())
+    print(f"  Risk series rows: {len(risk_series_df)}")
+    print(f"  Metrics rows: {len(metrics_df)}")
+    print(f"  Time-sliced metrics rows: {len(time_sliced_metrics_df)}")
+    print(f"\nFirst few risk series rows:")
+    print(risk_series_df.head())
+    print(f"\nFirst few metrics rows:")
+    print(metrics_df.head())
 
 
 if __name__ == "__main__":
