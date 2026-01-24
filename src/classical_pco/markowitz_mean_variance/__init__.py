@@ -11,12 +11,14 @@ from .markowitz_optimizer import (
     optimize_portfolio,
     generate_efficient_frontier
 )
+from .cache import MarkowitzCache
 
 __all__ = [
     'run_markowitz_optimization',
     'compute_covariance_matrix',
     'compute_expected_returns',
     'optimize_portfolio',
-    'generate_efficient_frontier'
+    'generate_efficient_frontier',
+    'MarkowitzCache'
 ]
 

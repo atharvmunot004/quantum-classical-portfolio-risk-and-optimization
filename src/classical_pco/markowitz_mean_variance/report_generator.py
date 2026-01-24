@@ -5,6 +5,7 @@ Generates comprehensive markdown reports with all optimization metrics and insig
 """
 import pandas as pd
 import numpy as np
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 from datetime import datetime
@@ -267,6 +268,69 @@ def generate_report(
             report_lines.append(f"- **Average Solver Time:** {avg_solver_time:.2f} ms")
             report_lines.append("")
     
+    # Limitations of Mean-Variance Framework
+    if "limitations_of_mean_variance" in report_sections:
+        report_lines.append("## Limitations of Mean-Variance Framework")
+        report_lines.append("")
+        report_lines.append("The Markowitz mean-variance framework, while foundational, has several well-known limitations:")
+        report_lines.append("")
+        report_lines.append("### 1. Normality Assumption")
+        report_lines.append("- Assumes returns follow a normal distribution")
+        report_lines.append("- Real-world returns often exhibit skewness, kurtosis, and fat tails")
+        report_lines.append("- May underestimate tail risk and extreme events")
+        report_lines.append("")
+        
+        if 'skewness' in metrics_df.columns or 'kurtosis' in metrics_df.columns:
+            if 'skewness' in metrics_df.columns:
+                avg_skew = metrics_df['skewness'].mean()
+                if abs(avg_skew) > 0.5:
+                    report_lines.append(f"- **Observed average skewness:** {avg_skew:.4f} (indicates non-normal distribution)")
+                    report_lines.append("")
+            if 'kurtosis' in metrics_df.columns:
+                avg_kurt = metrics_df['kurtosis'].mean()
+                if avg_kurt > 3:
+                    report_lines.append(f"- **Observed average excess kurtosis:** {avg_kurt:.4f} (indicates fat tails)")
+                    report_lines.append("")
+        
+        report_lines.append("### 2. Estimation Error")
+        report_lines.append("- Covariance matrix and expected returns are estimated from historical data")
+        report_lines.append("- Estimation error is not explicitly modeled")
+        report_lines.append("- Small sample sizes can lead to unstable covariance estimates")
+        report_lines.append("- Out-of-sample performance may differ significantly from in-sample")
+        report_lines.append("")
+        
+        report_lines.append("### 3. Static Framework")
+        report_lines.append("- Assumes parameters (returns, covariances) are constant over time")
+        report_lines.append("- Does not account for time-varying volatility or regime changes")
+        report_lines.append("- May not adapt well to changing market conditions")
+        report_lines.append("")
+        
+        report_lines.append("### 4. Risk Measure Limitations")
+        report_lines.append("- Variance as risk measure treats upside and downside volatility equally")
+        report_lines.append("- Does not distinguish between good and bad volatility")
+        report_lines.append("- May not capture tail risk adequately (VaR/CVaR provide better tail risk measures)")
+        report_lines.append("")
+        
+        report_lines.append("### 5. Sensitivity to Inputs")
+        report_lines.append("- Optimal portfolios are highly sensitive to expected return estimates")
+        report_lines.append("- Small changes in inputs can lead to large changes in optimal weights")
+        report_lines.append("- This sensitivity makes the framework less robust in practice")
+        report_lines.append("")
+        
+        report_lines.append("### 6. Transaction Costs and Constraints")
+        report_lines.append("- Does not explicitly model transaction costs")
+        report_lines.append("- May suggest frequent rebalancing which is costly")
+        report_lines.append("- Integer constraints (e.g., minimum lot sizes) not naturally handled")
+        report_lines.append("")
+        
+        report_lines.append("### Alternative Approaches")
+        report_lines.append("These limitations motivate alternative frameworks:")
+        report_lines.append("- **Black-Litterman:** Incorporates investor views and addresses estimation error")
+        report_lines.append("- **CVaR Optimization:** Focuses on tail risk rather than variance")
+        report_lines.append("- **Robust Optimization:** Accounts for parameter uncertainty")
+        report_lines.append("- **Bayesian Methods:** Explicitly model estimation uncertainty")
+        report_lines.append("")
+    
     # Key Insights
     if "key_insights" in report_sections:
         report_lines.append("## Key Insights")
@@ -307,6 +371,78 @@ def generate_report(
     
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(report_content)
-    
+
     return report_content
+
+
+def generate_metrics_schema(
+    metrics_df: pd.DataFrame,
+    output_path: Union[str, Path]
+) -> Dict:
+    """
+    Generate metrics schema JSON from metrics DataFrame.
+    
+    Args:
+        metrics_df: DataFrame with all computed metrics
+        output_path: Path to save the schema JSON
+        
+    Returns:
+        Schema dictionary
+    """
+    schema = {
+        'metrics': {},
+        'metadata': {
+            'generated_at': datetime.now().isoformat(),
+            'num_metrics': len(metrics_df.columns),
+            'num_portfolios': len(metrics_df)
+        }
+    }
+    
+    # Categorize metrics based on naming patterns
+    for col in metrics_df.columns:
+        if col.startswith('_'):
+            continue  # Skip internal columns
+        
+        metric_info = {
+            'dtype': str(metrics_df[col].dtype),
+            'nullable': bool(metrics_df[col].isna().any()),
+            'description': ''
+        }
+        
+        # Add description based on metric name
+        if 'sharpe' in col.lower():
+            metric_info['description'] = 'Sharpe ratio metric'
+        elif 'sortino' in col.lower():
+            metric_info['description'] = 'Sortino ratio metric'
+        elif 'drawdown' in col.lower():
+            metric_info['description'] = 'Drawdown metric'
+        elif 'volatility' in col.lower():
+            metric_info['description'] = 'Volatility metric'
+        elif 'return' in col.lower():
+            metric_info['description'] = 'Return metric'
+        elif 'var' in col.lower() or 'cvar' in col.lower():
+            metric_info['description'] = 'Risk metric (VaR/CVaR)'
+        elif 'hhi' in col.lower() or 'concentration' in col.lower():
+            metric_info['description'] = 'Concentration metric'
+        elif 'entropy' in col.lower():
+            metric_info['description'] = 'Entropy metric'
+        elif 'runtime' in col.lower() or 'time' in col.lower():
+            metric_info['description'] = 'Runtime metric'
+        elif 'skew' in col.lower() or 'kurtosis' in col.lower():
+            metric_info['description'] = 'Distribution metric'
+        elif 'correlation' in col.lower():
+            metric_info['description'] = 'Correlation metric'
+        else:
+            metric_info['description'] = 'Portfolio metric'
+        
+        schema['metrics'][col] = metric_info
+    
+    # Write schema
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(schema, f, indent=2, ensure_ascii=False, default=str)
+    
+    return schema
 
