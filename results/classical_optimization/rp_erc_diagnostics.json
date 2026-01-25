@@ -1,0 +1,16 @@
+{
+  "total_tasks": 27000,
+  "successful_results": 2619000,
+  "mpi_size": 1,
+  "estimation_windows": [
+    252,
+    500,
+    750
+  ],
+  "covariance_estimators": [
+    "sample",
+    "oas",
+    "ewma"
+  ],
+  "data_period": "2015-12-01 to 2025-12-01"
+}
