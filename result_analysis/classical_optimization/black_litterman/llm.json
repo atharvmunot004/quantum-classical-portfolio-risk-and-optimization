@@ -1,26 +1,28 @@
 {
     "analysis_task": "black_litterman_classical_optimization_analysis",
   
-    "model": "black_litterman",
+    "analysis_principle": {
+      "optimization_scope": "portfolio_level",
+      "result_format": "markdown_tables_only",
+      "rationale": "Classical optimization results are best communicated via interpretable summary tables (mean return, risk, drawdown, risk-adjusted ratios). All tabular outputs are rendered as Markdown documents suitable for direct inclusion in IEEE Access manuscripts."
+    },
   
     "inputs": {
       "metrics_table": "results/classical_optimization/bl_metrics.parquet",
       "time_sliced_metrics_table": "results/classical_optimization/bl_time_sliced_metrics.parquet",
-      "optimal_weights": "results/classical_optimization/bl_optimal_weights.parquet",
-      "posterior_returns": "results/classical_optimization/bl_posterior_returns.parquet",
-      "posterior_covariance": "results/classical_optimization/bl_posterior_covariance.parquet",
-      "runtime_profile": "results/classical_optimization/bl_runtime_profile.json"
+      "runtime_profile": "results/classical_optimization/bl_runtime_profile.json",
+      "metrics_schema": "results/classical_optimization/bl_metrics_schema.json"
     },
   
     "analysis_scope": {
       "level": "portfolio",
       "dimensions": [
-        "portfolio_id",
-        "asset_set_id",
-        "views_confidence_level"
+        "portfolio_id"
       ],
-      "num_portfolios_expected": 100000,
-      "exclude_asset_level_metrics": true
+      "grouping": {
+        "primary": "asset_set_id",
+        "secondary": "views_confidence_level"
+      }
     },
   
     "data_validation": {
@@ -28,22 +30,16 @@
         "mean_return",
         "volatility",
         "sharpe_ratio",
+        "sortino_ratio",
         "max_drawdown",
+        "calmar_ratio",
         "value_at_risk",
         "conditional_value_at_risk"
       ],
       "consistency_checks": [
         {
-          "name": "weights_sum_to_one",
-          "rule": "abs(sum(weights) - 1.0) < 1e-6"
-        },
-        {
-          "name": "long_only_respected",
-          "rule": "min(weights) >= 0"
-        },
-        {
-          "name": "var_positive",
-          "rule": "value_at_risk > 0"
+          "name": "positive_volatility",
+          "rule": "volatility > 0"
         },
         {
           "name": "cvar_ge_var",
@@ -57,7 +53,20 @@
         "metrics": [
           "mean_return",
           "volatility",
-          "sharpe_ratio",
+          "sharpe_ratio"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ]
+      },
+  
+      "downside_risk_analysis": {
+        "metrics": [
+          "max_drawdown",
+          "value_at_risk",
+          "conditional_value_at_risk",
           "sortino_ratio",
           "calmar_ratio"
         ],
@@ -68,178 +77,167 @@
         ]
       },
   
-      "drawdown_risk": {
+      "distributional_characteristics": {
         "metrics": [
-          "max_drawdown"
+          "skewness",
+          "kurtosis",
+          "jarque_bera_p_value"
         ],
-        "aggregation": [
-          "mean",
-          "median",
-          "worst_case"
+        "interpretation_note": "Used to highlight deviation from normality despite mean–variance optimization assumptions."
+      }
+    },
+  
+    "ranking_analysis": {
+      "ranking_objective": "risk_adjusted_return",
+  
+      "ranking_metrics": [
+        {
+          "metric": "sharpe_ratio",
+          "weight": 0.4,
+          "higher_is_better": true
+        },
+        {
+          "metric": "sortino_ratio",
+          "weight": 0.3,
+          "higher_is_better": true
+        },
+        {
+          "metric": "max_drawdown",
+          "weight": 0.2,
+          "higher_is_better": false
+        },
+        {
+          "metric": "conditional_value_at_risk",
+          "weight": 0.1,
+          "higher_is_better": false
+        }
+      ],
+  
+      "selection": {
+        "top_k": 25,
+        "also_report_percentiles": [
+          1,
+          5,
+          10
         ]
-      },
-  
-      "tail_risk": {
-        "metrics": [
-          "value_at_risk",
-          "conditional_value_at_risk"
-        ],
-        "confidence_levels": [0.95, 0.99],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
       }
     },
   
-    "distributional_diagnostics": {
-      "metrics": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "interpretation": {
-        "normality_rejection_expected": true,
-        "note": "Departures from normality justify BL posterior updating and downstream tail-risk models."
-      }
-    },
-  
-    "posterior_vs_prior_analysis": {
-      "compare": [
-        "prior_equilibrium_returns",
-        "posterior_returns"
-      ],
-      "metrics": [
-        "mean_shift",
-        "variance_shift",
-        "directional_alignment_with_views"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ]
-    },
-  
-    "weight_structure_analysis": {
-      "metrics": [
-        "num_active_assets",
-        "max_weight",
-        "effective_number_of_assets",
-        "weight_entropy"
-      ],
-      "constraints_validation": {
-        "max_weight_per_asset": 0.25,
-        "fully_invested": true,
-        "long_only": true
-      }
-    },
-  
-    "time_sliced_analysis": {
+    "time_sliced_performance": {
       "enabled": true,
-      "slice_by": [
-        "calendar_year"
-      ],
-      "metrics": [
-        "mean_return",
-        "sharpe_ratio",
-        "max_drawdown",
-        "value_at_risk",
-        "conditional_value_at_risk"
-      ],
-      "compare_across_slices": true
-    },
-  
-    "views_sensitivity_analysis": {
-      "dimensions": [
-        "views_confidence_level"
-      ],
+      "slice_unit": "calendar_year",
       "metrics": [
         "mean_return",
         "volatility",
         "sharpe_ratio",
-        "value_at_risk"
+        "max_drawdown"
       ],
-      "interpretation": {
-        "higher_confidence_views": "stronger deviation from equilibrium",
-        "lower_confidence_views": "closer to market prior"
-      }
+      "minimum_observations": 200,
+      "interpretation_goal": "Evaluate robustness of BL portfolios across market regimes."
     },
   
-    "scalability_and_runtime_analysis": {
-      "stages": [
-        "stage_A_precompute",
-        "stage_B_expand_weights",
-        "stage_C_batch_evaluate"
-      ],
+    "views_impact_analysis": {
+      "enabled": true,
+      "compare_by": "views_confidence_level",
       "metrics": [
-        "wall_clock_time_seconds",
-        "percentage_of_total_time"
+        "mean_return",
+        "volatility",
+        "sharpe_ratio",
+        "max_drawdown"
       ],
-      "derived_metrics": [
-        "time_per_asset_set",
-        "time_per_1000_portfolios"
-      ],
-      "gpu_utilization": {
-        "enabled": false,
-        "note": "GPU acceleration optional; small-matrix BL steps remain CPU-bound."
-      }
+      "interpretation_note": "Higher-confidence views should improve risk-adjusted performance without increasing drawdowns excessively."
     },
   
-    "robustness_checks": {
-      "estimation_window_sensitivity": {
-        "compare_windows": [252],
-        "metrics": [
-          "sharpe_ratio",
-          "max_drawdown",
-          "value_at_risk"
-        ]
+    "computational_performance_analysis": {
+      "runtime_breakdown": {
+        "stages": [
+          "stage_A_precompute",
+          "stage_B_expand_weights",
+          "stage_C_batch_evaluate"
+        ],
+        "report_units": "seconds"
       },
   
-      "constraint_binding_frequency": {
-        "metrics": [
-          "frequency_max_weight_binding",
-          "frequency_long_only_binding"
-        ]
-      }
+      "scalability_metrics": {
+        "total_portfolios": 100000,
+        "runtime_per_1k_portfolios": "total_time / 100"
+      },
+  
+      "report_note": "Demonstrates feasibility of Black–Litterman optimization at large scale via asset-set precomputation."
     },
   
     "outputs": {
-      "summary_tables": {
-        "path": "result_analysis/classical_optimization/black_litterman/bl_analysis_summary.parquet"
-      },
+      "markdown_tables": {
+        "root_path": "result_analysis/classical_optimization/black_litterman/",
   
-      "time_sliced_tables": {
-        "path": "result_analysis/classical_optimization/black_litterman/bl_time_sliced_analysis.parquet"
-      },
-  
-      "weight_diagnostics_tables": {
-        "path": "result_analysis/classical_optimization/black_litterman/bl_weight_structure_analysis.parquet"
-      },
-  
-      "figures": {
-        "path": "result_analysis/classical_optimization/black_litterman/figures/",
-        "plots": [
-          "efficient_frontier_scatter",
-          "sharpe_distribution",
-          "drawdown_distribution",
-          "var_cvar_distribution",
-          "posterior_vs_prior_returns",
-          "runtime_stage_breakdown"
+        "tables": [
+          {
+            "name": "bl_overall_performance_summary.md",
+            "contents": [
+              "mean_return",
+              "volatility",
+              "sharpe_ratio",
+              "sortino_ratio",
+              "max_drawdown",
+              "calmar_ratio",
+              "value_at_risk",
+              "conditional_value_at_risk"
+            ]
+          },
+          {
+            "name": "bl_top_portfolios_ranking.md",
+            "contents": [
+              "portfolio_id",
+              "mean_return",
+              "sharpe_ratio",
+              "sortino_ratio",
+              "max_drawdown",
+              "conditional_value_at_risk"
+            ]
+          },
+          {
+            "name": "bl_time_sliced_performance.md",
+            "contents": [
+              "year",
+              "mean_return",
+              "volatility",
+              "sharpe_ratio",
+              "max_drawdown"
+            ]
+          },
+          {
+            "name": "bl_views_confidence_comparison.md",
+            "contents": [
+              "views_confidence_level",
+              "mean_return",
+              "volatility",
+              "sharpe_ratio",
+              "max_drawdown"
+            ]
+          },
+          {
+            "name": "bl_runtime_profile.md",
+            "contents": [
+              "stage_A_precompute",
+              "stage_B_expand_weights",
+              "stage_C_batch_evaluate",
+              "total_time",
+              "runtime_per_1k_portfolios"
+            ]
+          }
         ]
       },
   
       "report": {
         "path": "result_analysis/classical_optimization/black_litterman/bl_analysis_report.md",
-        "sections": [
+        "include_sections": [
           "experimental_setup",
           "black_litterman_model_overview",
-          "portfolio_performance_results",
-          "tail_risk_characteristics",
-          "posterior_vs_prior_effects",
-          "weight_structure_and_constraints",
-          "views_sensitivity",
-          "scalability_and_runtime",
+          "portfolio_performance_summary",
+          "risk_and_drawdown_analysis",
+          "impact_of_investor_views",
+          "temporal_robustness",
+          "computational_scalability",
           "discussion"
         ]
       }
