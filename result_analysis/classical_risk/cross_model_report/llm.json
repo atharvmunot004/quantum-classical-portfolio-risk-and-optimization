@@ -1,0 +1,263 @@
+{
+    "analysis_task": "cross_model_var_cvar_asset_level_analysis",
+  
+    "models_compared": [
+      "variance_covariance",
+      "garch_1_1",
+      "monte_carlo",
+      "evt_pot"
+    ],
+  
+    "inputs": {
+      "variance_covariance": {
+        "metrics_table": "results/classical_risk/varcov_asset_level_metrics.parquet",
+        "time_sliced_metrics_table": "results/classical_risk/varcov_asset_level_time_sliced_metrics.parquet"
+      },
+  
+      "garch_1_1": {
+        "metrics_table": "results/classical_risk/garch_asset_level_metrics.parquet",
+        "time_sliced_metrics_table": "results/classical_risk/garch_asset_level_time_sliced_metrics.parquet"
+      },
+  
+      "monte_carlo": {
+        "metrics_table": "results/classical_risk/mcs_asset_level_metrics.parquet",
+        "time_sliced_metrics_table": "results/classical_risk/mcs_asset_level_time_sliced_metrics.parquet"
+      },
+  
+      "evt_pot": {
+        "metrics_table": "results/classical_risk/evt_asset_level_metrics.parquet",
+        "time_sliced_metrics_table": "results/classical_risk/evt_asset_level_time_sliced_metrics.parquet"
+      }
+    },
+  
+    "analysis_scope": {
+      "level": "asset",
+      "common_dimensions": [
+        "asset",
+        "confidence_level",
+        "horizon",
+        "estimation_window"
+      ],
+      "alignment_policy": {
+        "require_common_assets": true,
+        "require_common_windows": true,
+        "require_common_confidence_levels": true,
+        "require_common_horizons": true
+      }
+    },
+  
+    "metric_harmonization": {
+      "core_metrics": [
+        "hit_rate",
+        "violation_ratio",
+        "num_violations",
+        "expected_violations",
+        "kupiec_unconditional_coverage",
+        "christoffersen_independence",
+        "christoffersen_conditional_coverage",
+        "traffic_light_zone",
+        "mean_exceedance",
+        "rmse_var_vs_losses",
+        "skewness",
+        "kurtosis"
+      ],
+      "missing_metric_policy": {
+        "strategy": "ignore_model_for_metric",
+        "note": "If a model does not produce a metric (e.g., CVaR for Var-Cov), exclude that model from that metric comparison."
+      }
+    },
+  
+    "primary_comparisons": {
+      "coverage_accuracy": {
+        "metrics": [
+          "hit_rate",
+          "violation_ratio"
+        ],
+        "expected_hit_rate": "1 - confidence_level",
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ],
+        "ranking": {
+          "criterion": "abs(hit_rate - expected_hit_rate)",
+          "lower_is_better": true
+        }
+      },
+  
+      "statistical_backtesting": {
+        "tests": [
+          "kupiec_unconditional_coverage",
+          "christoffersen_independence",
+          "christoffersen_conditional_coverage"
+        ],
+        "significance_level": 0.05,
+        "comparison_metrics": [
+          "rejection_rate",
+          "mean_p_value"
+        ]
+      },
+  
+      "regulatory_diagnostics": {
+        "metric": "traffic_light_zone",
+        "aggregation": [
+          "green_percentage",
+          "yellow_percentage",
+          "red_percentage"
+        ]
+      }
+    },
+  
+    "tail_risk_comparison": {
+      "var_tail_behavior": {
+        "metrics": [
+          "mean_exceedance",
+          "max_exceedance",
+          "rmse_var_vs_losses"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ],
+        "interpretation_rule": "Lower exceedance magnitude with correct coverage is preferred."
+      },
+  
+      "cvar_tail_behavior": {
+        "enabled": true,
+        "models": [
+          "garch_1_1",
+          "monte_carlo",
+          "evt_pot"
+        ],
+        "metrics": [
+          "cvar_mean_exceedance",
+          "rmse_cvar_vs_losses"
+        ]
+      }
+    },
+  
+    "distributional_assumption_diagnostics": {
+      "compare_models": true,
+      "metrics": [
+        "skewness",
+        "kurtosis",
+        "jarque_bera_p_value"
+      ],
+      "expected_patterns": {
+        "variance_covariance": "normality_rejected",
+        "garch_1_1": "fat_tails_partially_captured",
+        "monte_carlo": "method_dependent",
+        "evt_pot": "tail_focused_no_normality_assumption"
+      }
+    },
+  
+    "time_sliced_cross_analysis": {
+      "enabled": true,
+      "slice_by": [
+        "year",
+        "quarter"
+      ],
+      "metrics": [
+        "hit_rate",
+        "violation_ratio",
+        "traffic_light_zone"
+      ],
+      "minimum_observations": 60,
+      "compare_models_within_slice": true,
+      "stress_period_identification": {
+        "criterion": "aggregate_violation_ratio > 1.5",
+        "label_as": "stress_regime"
+      }
+    },
+  
+    "robustness_cross_checks": {
+      "window_sensitivity": {
+        "compare_windows": [252, 500],
+        "metrics": [
+          "hit_rate",
+          "violation_ratio"
+        ]
+      },
+  
+      "horizon_scaling_behavior": {
+        "compare_horizons": [1, 10],
+        "metrics": [
+          "violation_ratio",
+          "rmse_var_vs_losses"
+        ],
+        "note": "Highlights weaknesses of sqrt-time scaling vs path-based simulation."
+      }
+    },
+  
+    "overall_model_ranking": {
+      "composite_score": {
+        "components": [
+          {
+            "metric": "abs(hit_rate - expected_hit_rate)",
+            "weight": 0.4
+          },
+          {
+            "metric": "violation_ratio",
+            "target": 1.0,
+            "weight": 0.25
+          },
+          {
+            "metric": "rmse_var_vs_losses",
+            "weight": 0.25
+          },
+          {
+            "metric": "kupiec_rejection_rate",
+            "weight": 0.1
+          }
+        ],
+        "normalize_metrics": true
+      },
+      "ranking_scope": [
+        "confidence_level",
+        "horizon"
+      ]
+    },
+  
+    "outputs": {
+      "summary_tables": {
+        "path": "result_analysis/classical_risk/cross_model/cross_model_summary.parquet"
+      },
+  
+      "time_sliced_tables": {
+        "path": "result_analysis/classical_risk/cross_model/cross_model_time_sliced_summary.parquet"
+      },
+  
+      "ranking_tables": {
+        "path": "result_analysis/classical_risk/cross_model/cross_model_rankings.parquet"
+      },
+  
+      "figures": {
+        "path": "result_analysis/classical_risk/cross_model/figures/",
+        "plots": [
+          "hit_rate_comparison_by_model",
+          "violation_ratio_comparison_by_model",
+          "traffic_light_distribution",
+          "tail_exceedance_comparison",
+          "time_sliced_model_performance",
+          "overall_model_ranking"
+        ]
+      },
+  
+      "report": {
+        "path": "result_analysis/classical_risk/cross_model/cross_model_analysis_report.md",
+        "sections": [
+          "experimental_setup",
+          "coverage_accuracy_comparison",
+          "statistical_backtesting_comparison",
+          "tail_risk_comparison",
+          "distributional_assumption_effects",
+          "regime_dependent_performance",
+          "robustness_analysis",
+          "overall_model_ranking",
+          "discussion_and_implications"
+        ]
+      }
+    }
+  }
+  
