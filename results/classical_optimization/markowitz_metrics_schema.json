@@ -1,0 +1,159 @@
+{
+  "metrics": {
+    "portfolio_id": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "objective": {
+      "dtype": "object",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "risk_aversion": {
+      "dtype": "object",
+      "nullable": true,
+      "description": "Portfolio metric"
+    },
+    "expected_return": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Return metric"
+    },
+    "volatility": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Volatility metric"
+    },
+    "portfolio_variance": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Risk metric (VaR/CVaR)"
+    },
+    "sharpe_ratio": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Sharpe ratio metric"
+    },
+    "sortino_ratio": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Sortino ratio metric"
+    },
+    "max_drawdown": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Drawdown metric"
+    },
+    "calmar_ratio": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "num_assets_in_portfolio": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "hhi_concentration": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Concentration metric"
+    },
+    "effective_number_of_assets": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "weight_entropy": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Entropy metric"
+    },
+    "pairwise_correlation_mean": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Correlation metric"
+    },
+    "value_at_risk": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "conditional_value_at_risk": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "value_at_risk_95": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "conditional_value_at_risk_95": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "value_at_risk_99": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "conditional_value_at_risk_99": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "downside_deviation": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "skewness": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Distribution metric"
+    },
+    "kurtosis": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Distribution metric"
+    },
+    "jarque_bera_p_value": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "jarque_bera_statistic": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio metric"
+    },
+    "runtime_per_optimization_ms": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Runtime metric"
+    },
+    "covariance_estimation_time_ms": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Risk metric (VaR/CVaR)"
+    },
+    "solver_time_ms": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Runtime metric"
+    },
+    "optimization_status": {
+      "dtype": "object",
+      "nullable": false,
+      "description": "Portfolio metric"
+    }
+  },
+  "metadata": {
+    "generated_at": "2026-01-24T04:42:55.500707",
+    "num_metrics": 30,
+    "num_portfolios": 100000
+  }
+}

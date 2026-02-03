@@ -129,7 +129,8 @@ def optimize_portfolio(
     risk_free_rate: float = 0.0,
     constraints: Optional[Dict] = None,
     solver: str = 'osqp',
-    tolerance: float = 1e-6
+    tolerance: float = 1e-6,
+    warm_start: bool = False
 ) -> Tuple[pd.Series, Dict, float]:
     """
     Optimize portfolio using Markowitz mean-variance framework.
@@ -223,7 +224,8 @@ def optimize_portfolio(
         problem = cp.Problem(objective_func, constraint_list)
         
         if solver == 'osqp' and OSQP_AVAILABLE:
-            problem.solve(solver=cp.OSQP, eps_abs=tolerance, eps_rel=tolerance)
+            solver_options = {'eps_abs': tolerance, 'eps_rel': tolerance, 'warm_start': warm_start}
+            problem.solve(solver=cp.OSQP, **solver_options)
         else:
             problem.solve(solver=cp.ECOS, abstol=tolerance, reltol=tolerance)
         
@@ -311,6 +313,8 @@ def generate_efficient_frontier(
     covariance_matrix: pd.DataFrame,
     num_portfolios: int = 100,
     risk_levels: Union[str, List[float]] = 'auto',
+    method: str = 'target_return_constraint',
+    target_return_grid: str = 'linspace',
     constraints: Optional[Dict] = None,
     risk_free_rate: float = 0.0,
     solver: str = 'osqp',
@@ -324,6 +328,8 @@ def generate_efficient_frontier(
         covariance_matrix: Covariance matrix DataFrame
         num_portfolios: Number of portfolios to generate
         risk_levels: 'auto' or list of target risk levels
+        method: 'target_return_constraint' or 'target_volatility_constraint'
+        target_return_grid: 'linspace' or 'logspace' for return grid generation
         constraints: Dictionary of constraints
         risk_free_rate: Risk-free rate
         solver: Solver backend
@@ -336,10 +342,13 @@ def generate_efficient_frontier(
     assets = expected_returns.index.intersection(covariance_matrix.index)
     mu = expected_returns[assets].values
     Sigma = covariance_matrix.loc[assets, assets].values
+    n = len(assets)
     
-    # Determine risk levels
-    if risk_levels == 'auto':
-        # Find min variance and max return portfolios to determine range
+    frontier_portfolios = []
+    
+    if method == 'target_return_constraint':
+        # Generate frontier by targeting specific returns
+        # First find min variance and max return portfolios
         min_var_weights, _, _ = optimize_portfolio(
             expected_returns[assets],
             covariance_matrix.loc[assets, assets],
@@ -349,50 +358,168 @@ def generate_efficient_frontier(
             tolerance=tolerance
         )
         min_var_return = mu @ min_var_weights.values
-        min_var_vol = np.sqrt(min_var_weights.values @ Sigma @ min_var_weights.values)
         
-        # Max return (subject to constraints)
-        max_return = np.max(mu)
-        max_vol = np.sqrt(np.max(np.diag(Sigma)))  # Approximate
-        
-        # Generate risk levels
-        target_vols = np.linspace(min_var_vol, max_vol, num_portfolios)
-    else:
-        target_vols = risk_levels
-    
-    frontier_portfolios = []
-    
-    for target_vol in target_vols:
-        try:
-            # Optimize for target volatility using risk-return tradeoff
-            # Approximate lambda to achieve target volatility
-            # This is a simplified approach - in practice, use bisection or similar
-            lambda_guess = 1.0
+        # Max return portfolio (maximize return subject to constraints)
+        if CVXPY_AVAILABLE and solver in ['cvxpy', 'osqp']:
+            w_max = cp.Variable(n)
+            objective_max = cp.Maximize(mu @ w_max)
+            constraint_list_max = []
             
-            weights, _, _ = optimize_portfolio(
+            if constraints.get('fully_invested', True):
+                constraint_list_max.append(cp.sum(w_max) == 1.0)
+            if constraints.get('long_only', True) or constraints.get('no_short_selling', True):
+                constraint_list_max.append(w_max >= 0.0)
+            
+            weight_bounds = constraints.get('weight_bounds', [0.0, 1.0])
+            constraint_list_max.append(w_max >= weight_bounds[0])
+            constraint_list_max.append(w_max <= weight_bounds[1])
+            
+            max_weight = constraints.get('max_weight_per_asset')
+            if max_weight is not None:
+                constraint_list_max.append(w_max <= max_weight)
+            
+            problem_max = cp.Problem(objective_max, constraint_list_max)
+            if solver == 'osqp' and OSQP_AVAILABLE:
+                problem_max.solve(solver=cp.OSQP, eps_abs=tolerance, eps_rel=tolerance)
+            else:
+                problem_max.solve(solver=cp.ECOS, abstol=tolerance, reltol=tolerance)
+            
+            if problem_max.status in ['optimal', 'optimal_inaccurate']:
+                max_return = mu @ w_max.value
+            else:
+                max_return = np.max(mu)  # Fallback
+        else:
+            max_return = np.max(mu)
+        
+        # Generate target returns
+        if target_return_grid == 'linspace':
+            target_returns = np.linspace(min_var_return, max_return, num_portfolios)
+        else:  # logspace or default to linspace
+            target_returns = np.linspace(min_var_return, max_return, num_portfolios)
+        
+        # Optimize for each target return
+        for target_return in target_returns:
+            try:
+                # Minimize variance subject to target return constraint
+                if CVXPY_AVAILABLE and solver in ['cvxpy', 'osqp']:
+                    w = cp.Variable(n)
+                    objective_func = cp.Minimize(cp.quad_form(w, Sigma))
+                    constraint_list = []
+                    
+                    # Target return constraint
+                    constraint_list.append(mu @ w >= target_return)
+                    
+                    # Standard constraints
+                    if constraints.get('fully_invested', True):
+                        constraint_list.append(cp.sum(w) == 1.0)
+                    if constraints.get('long_only', True) or constraints.get('no_short_selling', True):
+                        constraint_list.append(w >= 0.0)
+                    
+                    weight_bounds = constraints.get('weight_bounds', [0.0, 1.0])
+                    constraint_list.append(w >= weight_bounds[0])
+                    constraint_list.append(w <= weight_bounds[1])
+                    
+                    max_weight = constraints.get('max_weight_per_asset')
+                    if max_weight is not None:
+                        constraint_list.append(w <= max_weight)
+                    
+                    problem = cp.Problem(objective_func, constraint_list)
+                    if solver == 'osqp' and OSQP_AVAILABLE:
+                        problem.solve(solver=cp.OSQP, eps_abs=tolerance, eps_rel=tolerance)
+                    else:
+                        problem.solve(solver=cp.ECOS, abstol=tolerance, reltol=tolerance)
+                    
+                    if problem.status not in ['optimal', 'optimal_inaccurate']:
+                        continue
+                    
+                    weights_array = w.value
+                else:
+                    # Fallback: use risk-return tradeoff with adjusted lambda
+                    # This is approximate
+                    lambda_guess = 1.0
+                    weights, _, _ = optimize_portfolio(
+                        expected_returns[assets],
+                        covariance_matrix.loc[assets, assets],
+                        objective='risk_return_tradeoff',
+                        risk_aversion=lambda_guess,
+                        constraints=constraints,
+                        solver=solver,
+                        tolerance=tolerance
+                    )
+                    weights_array = weights.values
+                
+                weights_series = pd.Series(weights_array, index=assets)
+                weights_series = weights_series / weights_series.sum()  # Normalize
+                
+                portfolio_return = mu @ weights_series.values
+                portfolio_vol = np.sqrt(weights_series.values @ Sigma @ weights_series.values)
+                portfolio_sharpe = (portfolio_return - risk_free_rate) / portfolio_vol if portfolio_vol > 0 else np.nan
+                
+                frontier_portfolios.append({
+                    'expected_return': portfolio_return,
+                    'volatility': portfolio_vol,
+                    'portfolio_variance': portfolio_vol ** 2,
+                    'sharpe_ratio': portfolio_sharpe,
+                    **{f'weight_{asset}': weights_series[asset] for asset in assets}
+                })
+            except Exception as e:
+                warnings.warn(f"Failed to generate portfolio for target return {target_return:.6f}: {e}")
+                continue
+    
+    else:
+        # Original method: target volatility
+        if risk_levels == 'auto':
+            # Find min variance and max return portfolios to determine range
+            min_var_weights, _, _ = optimize_portfolio(
                 expected_returns[assets],
                 covariance_matrix.loc[assets, assets],
-                objective='risk_return_tradeoff',
-                risk_aversion=lambda_guess,
+                objective='min_variance',
                 constraints=constraints,
                 solver=solver,
                 tolerance=tolerance
             )
+            min_var_return = mu @ min_var_weights.values
+            min_var_vol = np.sqrt(min_var_weights.values @ Sigma @ min_var_weights.values)
             
-            portfolio_return = mu @ weights.values
-            portfolio_vol = np.sqrt(weights.values @ Sigma @ weights.values)
-            portfolio_sharpe = (portfolio_return - risk_free_rate) / portfolio_vol if portfolio_vol > 0 else np.nan
+            # Max return (subject to constraints)
+            max_return = np.max(mu)
+            max_vol = np.sqrt(np.max(np.diag(Sigma)))  # Approximate
             
-            frontier_portfolios.append({
-                'expected_return': portfolio_return,
-                'volatility': portfolio_vol,
-                'portfolio_variance': portfolio_vol ** 2,
-                'sharpe_ratio': portfolio_sharpe,
-                **{f'weight_{asset}': weights[asset] for asset in assets}
-            })
-        except Exception as e:
-            warnings.warn(f"Failed to generate portfolio for target vol {target_vol}: {e}")
-            continue
+            # Generate risk levels
+            target_vols = np.linspace(min_var_vol, max_vol, num_portfolios)
+        else:
+            target_vols = risk_levels
+        
+        for target_vol in target_vols:
+            try:
+                # Optimize for target volatility using risk-return tradeoff
+                # Approximate lambda to achieve target volatility
+                lambda_guess = 1.0
+                
+                weights, _, _ = optimize_portfolio(
+                    expected_returns[assets],
+                    covariance_matrix.loc[assets, assets],
+                    objective='risk_return_tradeoff',
+                    risk_aversion=lambda_guess,
+                    constraints=constraints,
+                    solver=solver,
+                    tolerance=tolerance
+                )
+                
+                portfolio_return = mu @ weights.values
+                portfolio_vol = np.sqrt(weights.values @ Sigma @ weights.values)
+                portfolio_sharpe = (portfolio_return - risk_free_rate) / portfolio_vol if portfolio_vol > 0 else np.nan
+                
+                frontier_portfolios.append({
+                    'expected_return': portfolio_return,
+                    'volatility': portfolio_vol,
+                    'portfolio_variance': portfolio_vol ** 2,
+                    'sharpe_ratio': portfolio_sharpe,
+                    **{f'weight_{asset}': weights[asset] for asset in assets}
+                })
+            except Exception as e:
+                warnings.warn(f"Failed to generate portfolio for target vol {target_vol}: {e}")
+                continue
     
     if len(frontier_portfolios) == 0:
         raise RuntimeError("Failed to generate any efficient frontier portfolios")

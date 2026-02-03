@@ -10,7 +10,8 @@ from .main import run_risk_parity_erc_optimization
 from .risk_parity_erc_optimizer import (
     compute_covariance_matrix,
     calculate_risk_contributions,
-    optimize_risk_parity_portfolio
+    optimize_risk_parity_portfolio,
+    optimize_risk_parity_portfolio_fixed_point
 )
 from .returns import (
     load_panel_prices,
@@ -31,12 +32,14 @@ from .metrics import (
     compute_runtime_metrics
 )
 from .report_generator import generate_report
+from .portfolio_selection import select_portfolios, save_selection_metadata, check_convergence
 
 __all__ = [
     'run_risk_parity_erc_optimization',
     'compute_covariance_matrix',
     'calculate_risk_contributions',
     'optimize_risk_parity_portfolio',
+    'optimize_risk_parity_portfolio_fixed_point',
     'load_panel_prices',
     'load_baseline_portfolios',
     'compute_daily_returns',
@@ -51,7 +54,10 @@ __all__ = [
     'compute_distribution_metrics',
     'compute_comparison_metrics',
     'compute_runtime_metrics',
-    'generate_report'
+    'generate_report',
+    'select_portfolios',
+    'save_selection_metadata',
+    'check_convergence'
 ]
 
 __version__ = '1.0.0'
