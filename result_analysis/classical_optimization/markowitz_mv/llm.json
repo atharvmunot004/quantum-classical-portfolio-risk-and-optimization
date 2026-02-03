@@ -1,0 +1,266 @@
+{
+    "analysis_task": "markowitz_mean_variance_classical_optimization_analysis",
+  
+    "analysis_principle": {
+      "optimization_scope": "portfolio_level",
+      "result_format": "markdown_tables_only",
+      "rationale": "Markowitz mean–variance optimization serves as a deterministic classical baseline. Results are communicated via interpretable markdown tables highlighting risk–return tradeoffs, portfolio structure, and known limitations under non-normal return distributions."
+    },
+  
+    "inputs": {
+      "metrics_table": "results/classical_optimization/markowitz_metrics.parquet",
+      "efficient_frontier": "results/classical_optimization/markowitz_efficient_frontier.parquet",
+      "metrics_schema": "results/classical_optimization/markowitz_metrics_schema.json",
+      "summary_report": "results/classical_optimization/markowitz_report.md"
+    },
+  
+    "analysis_scope": {
+      "level": "portfolio",
+      "dimensions": [
+        "portfolio_id",
+        "objective",
+        "risk_aversion"
+      ],
+      "grouping": {
+        "primary": "objective",
+        "secondary": "risk_aversion"
+      }
+    },
+  
+    "data_validation": {
+      "required_metrics": [
+        "expected_return",
+        "volatility",
+        "portfolio_variance",
+        "sharpe_ratio",
+        "max_drawdown"
+      ],
+      "consistency_checks": [
+        {
+          "name": "positive_variance",
+          "rule": "portfolio_variance > 0"
+        },
+        {
+          "name": "positive_volatility",
+          "rule": "volatility > 0"
+        }
+      ]
+    },
+  
+    "primary_performance_analysis": {
+      "risk_return_summary": {
+        "metrics": [
+          "expected_return",
+          "volatility",
+          "portfolio_variance",
+          "sharpe_ratio",
+          "sortino_ratio",
+          "calmar_ratio"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ]
+      },
+  
+      "downside_and_tail_risk": {
+        "metrics": [
+          "value_at_risk_95",
+          "conditional_value_at_risk_95",
+          "value_at_risk_99",
+          "conditional_value_at_risk_99",
+          "max_drawdown",
+          "downside_deviation"
+        ],
+        "interpretation_note": "Tail risk is reported for diagnostic purposes only; optimization objective remains variance-based."
+      }
+    },
+  
+    "efficient_frontier_analysis": {
+      "enabled": true,
+      "frontier_source": "efficient_frontier",
+      "x_axis": "volatility",
+      "y_axis": "expected_return",
+      "group_by": [
+        "objective"
+      ],
+      "analysis_goals": [
+        "illustrate_classical_efficient_frontier",
+        "compare_min_variance_vs_max_sharpe",
+        "highlight_return_variance_tradeoff"
+      ]
+    },
+  
+    "portfolio_structure_analysis": {
+      "metrics": [
+        "num_assets_in_portfolio",
+        "hhi_concentration",
+        "effective_number_of_assets",
+        "weight_entropy",
+        "pairwise_correlation_mean"
+      ],
+      "aggregation": [
+        "mean",
+        "median"
+      ],
+      "interpretation_note": "Mean–variance portfolios often exhibit concentration under estimation error."
+    },
+  
+    "distributional_diagnostics": {
+      "metrics": [
+        "skewness",
+        "kurtosis",
+        "jarque_bera_p_value"
+      ],
+      "interpretation_note": "Frequent rejection of normality highlights a core limitation of variance-based optimization."
+    },
+  
+    "robustness_checks": {
+      "objective_comparison": {
+        "compare": [
+          "min_variance",
+          "max_sharpe"
+        ],
+        "metrics": [
+          "expected_return",
+          "volatility",
+          "sharpe_ratio",
+          "max_drawdown"
+        ]
+      },
+  
+      "covariance_estimation_effect": {
+        "metrics": [
+          "portfolio_variance",
+          "sharpe_ratio"
+        ],
+        "note": "Ledoit–Wolf shrinkage mitigates but does not eliminate estimation error."
+      }
+    },
+  
+    "ranking_analysis": {
+      "ranking_objective": "classical_risk_adjusted_return",
+  
+      "ranking_metrics": [
+        {
+          "metric": "sharpe_ratio",
+          "weight": 0.45,
+          "higher_is_better": true
+        },
+        {
+          "metric": "sortino_ratio",
+          "weight": 0.25,
+          "higher_is_better": true
+        },
+        {
+          "metric": "max_drawdown",
+          "weight": 0.2,
+          "higher_is_better": false
+        },
+        {
+          "metric": "hhi_concentration",
+          "weight": 0.1,
+          "higher_is_better": false
+        }
+      ],
+  
+      "selection": {
+        "top_k": 25,
+        "also_report_percentiles": [
+          1,
+          5,
+          10
+        ]
+      }
+    },
+  
+    "computational_performance_analysis": {
+      "metrics": [
+        "runtime_per_optimization_ms",
+        "covariance_estimation_time_ms",
+        "solver_time_ms",
+        "p95_runtime_ms"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ],
+      "interpretation_note": "Mean–variance optimization is computationally efficient but sensitive to input estimation."
+    },
+  
+    "outputs": {
+      "markdown_tables": {
+        "root_path": "result_analysis/classical_optimization/markowitz_mv/",
+  
+        "tables": [
+          {
+            "name": "markowitz_overall_performance_summary.md",
+            "contents": [
+              "expected_return",
+              "volatility",
+              "portfolio_variance",
+              "sharpe_ratio",
+              "sortino_ratio",
+              "max_drawdown",
+              "calmar_ratio"
+            ]
+          },
+          {
+            "name": "markowitz_efficient_frontier_summary.md",
+            "contents": [
+              "objective",
+              "expected_return",
+              "volatility",
+              "portfolio_variance"
+            ]
+          },
+          {
+            "name": "markowitz_top_portfolios_ranking.md",
+            "contents": [
+              "portfolio_id",
+              "objective",
+              "expected_return",
+              "sharpe_ratio",
+              "max_drawdown",
+              "hhi_concentration"
+            ]
+          },
+          {
+            "name": "markowitz_structure_metrics.md",
+            "contents": [
+              "num_assets_in_portfolio",
+              "effective_number_of_assets",
+              "hhi_concentration",
+              "weight_entropy"
+            ]
+          },
+          {
+            "name": "markowitz_runtime_profile.md",
+            "contents": [
+              "runtime_per_optimization_ms",
+              "covariance_estimation_time_ms",
+              "solver_time_ms",
+              "p95_runtime_ms"
+            ]
+          }
+        ]
+      },
+  
+      "report": {
+        "path": "result_analysis/classical_optimization/markowitz_mv/markowitz_analysis_report.md",
+        "include_sections": [
+          "experimental_setup",
+          "mean_variance_theory",
+          "efficient_frontier_results",
+          "risk_return_tradeoff",
+          "portfolio_structure_effects",
+          "distributional_limitations",
+          "computational_performance",
+          "discussion"
+        ]
+      }
+    }
+  }
+  

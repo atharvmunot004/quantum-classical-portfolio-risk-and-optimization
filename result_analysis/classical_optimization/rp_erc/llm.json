@@ -1,0 +1,297 @@
+{
+    "analysis_task": "risk_parity_erc_classical_optimization_analysis",
+  
+    "analysis_principle": {
+      "optimization_scope": "portfolio_level",
+      "risk_model": "equal_risk_contribution",
+      "result_format": "markdown_tables_only",
+      "rationale": "Risk Parity (ERC) portfolios are evaluated through risk contribution balance, downside risk control, and diversification metrics. Results are communicated via markdown tables suitable for direct inclusion in IEEE Access manuscripts."
+    },
+  
+    "inputs": {
+      "metrics_table": "results/classical_optimization/rp_erc_metrics.parquet",
+      "metrics_schema": "results/classical_optimization/rp_erc_metrics_schema.json",
+      "summary_report": "results/classical_optimization/rp_erc_report.md"
+    },
+  
+    "analysis_scope": {
+      "level": "portfolio",
+      "dimensions": [
+        "portfolio_id",
+        "covariance_estimator",
+        "estimation_window",
+        "rebalancing_frequency"
+      ],
+      "grouping": {
+        "primary": "covariance_estimator",
+        "secondary": "estimation_window"
+      }
+    },
+  
+    "data_validation": {
+      "required_metrics": [
+        "risk_parity_deviation_score",
+        "equal_risk_gap",
+        "volatility",
+        "max_drawdown"
+      ],
+      "consistency_checks": [
+        {
+          "name": "non_negative_risk_contributions",
+          "rule": "min_risk_contribution >= 0"
+        },
+        {
+          "name": "finite_deviation_score",
+          "rule": "isfinite(risk_parity_deviation_score)"
+        }
+      ]
+    },
+  
+    "primary_risk_parity_analysis": {
+      "risk_contribution_balance": {
+        "metrics": [
+          "risk_contribution_variance",
+          "risk_contribution_std",
+          "risk_contribution_coefficient_of_variation",
+          "equal_risk_gap",
+          "risk_parity_deviation_score",
+          "risk_concentration_index"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ],
+        "interpretation_note": "Lower deviation and variance indicate better adherence to equal risk contribution."
+      },
+  
+      "portfolio_quality_metrics": {
+        "metrics": [
+          "expected_return",
+          "volatility",
+          "sharpe_ratio",
+          "sortino_ratio",
+          "max_drawdown",
+          "calmar_ratio"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ]
+      }
+    },
+  
+    "baseline_comparison_analysis": {
+      "enabled": true,
+      "baselines": [
+        "baseline_portfolios_from_file",
+        "equal_weight_same_assets",
+        "min_variance_same_assets"
+      ],
+      "comparison_metrics": [
+        "volatility_reduction_vs_baseline",
+        "sharpe_improvement_vs_baseline",
+        "risk_contribution_improvement_vs_baseline",
+        "erc_vs_equal_weight_volatility",
+        "erc_vs_equal_weight_sharpe",
+        "erc_vs_equal_weight_risk_contributions"
+      ],
+      "aggregation": [
+        "mean",
+        "median"
+      ]
+    },
+  
+    "downside_and_tail_risk_analysis": {
+      "metrics": [
+        "value_at_risk",
+        "conditional_value_at_risk",
+        "downside_deviation",
+        "semivariance",
+        "max_drawdown"
+      ],
+      "interpretation_note": "ERC portfolios often reduce volatility but may still exhibit tail losses under extreme correlations."
+    },
+  
+    "portfolio_structure_analysis": {
+      "metrics": [
+        "num_assets_in_portfolio",
+        "hhi_concentration",
+        "effective_number_of_assets",
+        "weight_entropy",
+        "pairwise_correlation_mean"
+      ],
+      "aggregation": [
+        "mean",
+        "median"
+      ],
+      "interpretation_note": "ERC encourages diversification by equalizing risk, not weights."
+    },
+  
+    "distributional_diagnostics": {
+      "metrics": [
+        "skewness",
+        "kurtosis",
+        "jarque_bera_p_value"
+      ],
+      "interpretation_note": "Normality is not assumed in ERC, but diagnostics contextualize tail behavior."
+    },
+  
+    "robustness_and_sensitivity": {
+      "covariance_estimator_sensitivity": {
+        "compare_estimators": [
+          "sample",
+          "oas",
+          "ewma"
+        ],
+        "metrics": [
+          "risk_parity_deviation_score",
+          "volatility",
+          "max_drawdown"
+        ]
+      },
+  
+      "window_sensitivity": {
+        "compare_windows": [252, 500, 750],
+        "metrics": [
+          "risk_parity_deviation_score",
+          "volatility"
+        ]
+      }
+    },
+  
+    "statistical_significance_analysis": {
+      "enabled": true,
+      "tests": [
+        "jobson_korkie_sharpe_difference",
+        "memmel_sharpe_correction",
+        "diebold_mariano_predictive_loss"
+      ],
+      "report_p_values": true
+    },
+  
+    "ranking_analysis": {
+      "ranking_objective": "risk_balanced_performance",
+  
+      "ranking_metrics": [
+        {
+          "metric": "risk_parity_deviation_score",
+          "weight": 0.35,
+          "higher_is_better": false
+        },
+        {
+          "metric": "sharpe_ratio",
+          "weight": 0.25,
+          "higher_is_better": true
+        },
+        {
+          "metric": "max_drawdown",
+          "weight": 0.2,
+          "higher_is_better": false
+        },
+        {
+          "metric": "hhi_concentration",
+          "weight": 0.2,
+          "higher_is_better": false
+        }
+      ],
+  
+      "selection": {
+        "top_k": 25,
+        "also_report_percentiles": [
+          1,
+          5,
+          10
+        ]
+      }
+    },
+  
+    "computational_performance_analysis": {
+      "metrics": [
+        "runtime_per_optimization_ms",
+        "covariance_estimation_time_ms",
+        "risk_contribution_calculation_time_ms",
+        "solver_time_ms"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ],
+      "interpretation_note": "ERC optimization trades computational cost for robustness against estimation error."
+    },
+  
+    "outputs": {
+      "markdown_tables": {
+        "root_path": "result_analysis/classical_optimization/risk_parity_erc/",
+  
+        "tables": [
+          {
+            "name": "erc_risk_contribution_balance.md",
+            "contents": [
+              "risk_contribution_variance",
+              "risk_contribution_std",
+              "risk_contribution_coefficient_of_variation",
+              "equal_risk_gap",
+              "risk_parity_deviation_score",
+              "risk_concentration_index"
+            ]
+          },
+          {
+            "name": "erc_portfolio_quality_summary.md",
+            "contents": [
+              "expected_return",
+              "volatility",
+              "sharpe_ratio",
+              "sortino_ratio",
+              "max_drawdown",
+              "calmar_ratio"
+            ]
+          },
+          {
+            "name": "erc_baseline_comparison.md",
+            "contents": [
+              "volatility_reduction_vs_baseline",
+              "sharpe_improvement_vs_baseline",
+              "risk_contribution_improvement_vs_baseline"
+            ]
+          },
+          {
+            "name": "erc_structure_metrics.md",
+            "contents": [
+              "num_assets_in_portfolio",
+              "effective_number_of_assets",
+              "hhi_concentration",
+              "weight_entropy"
+            ]
+          },
+          {
+            "name": "erc_runtime_profile.md",
+            "contents": [
+              "runtime_per_optimization_ms",
+              "covariance_estimation_time_ms",
+              "risk_contribution_calculation_time_ms",
+              "solver_time_ms"
+            ]
+          }
+        ]
+      },
+  
+      "report": {
+        "path": "result_analysis/classical_optimization/risk_parity_erc/erc_analysis_report.md",
+        "include_sections": [
+          "experimental_setup",
+          "risk_parity_and_erc_theory",
+          "risk_contribution_balance_results",
+          "portfolio_quality_and_downside_risk",
+          "comparison_with_baselines",
+          "robustness_and_sensitivity",
+          "statistical_significance",
+          "computational_performance",
+          "discussion"
+        ]
+      }
+    }
+  }
+  
