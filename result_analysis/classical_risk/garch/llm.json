@@ -1,0 +1,284 @@
+{
+  "analysis_task": "garch_1_1_asset_level_result_analysis",
+
+  "inputs": {
+    "metrics_table": "results/classical_risk/garch_asset_level_metrics.parquet",
+    "time_sliced_metrics_table": "results/classical_risk/garch_asset_level_time_sliced_metrics.parquet",
+    "risk_series_table": "results/classical_risk/garch_asset_var_cvar_series.parquet",
+    "volatility_series_table": "results/classical_risk/garch_asset_conditional_volatility_series.parquet",
+    "parameter_store": "cache/garch_asset_parameters.parquet"
+  },
+
+  "analysis_scope": {
+    "level": "asset",
+    "dimensions": [
+      "confidence_level",
+      "horizon",
+      "estimation_window"
+    ],
+    "exclude_portfolio_fields": true
+  },
+
+  "data_validation": {
+    "required_columns": [
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "hit_rate",
+      "violation_ratio"
+    ],
+    "drop_if_missing": [
+      "hit_rate",
+      "violation_ratio"
+    ],
+    "consistency_checks": [
+      {
+        "name": "hit_rate_bounds",
+        "rule": "0 <= hit_rate <= 1"
+      },
+      {
+        "name": "violation_ratio_finite",
+        "rule": "violation_ratio > 0"
+      }
+    ]
+  },
+
+  "primary_evaluation": {
+    "coverage_accuracy": {
+      "metrics": [
+        "hit_rate",
+        "violation_ratio"
+      ],
+      "expected_hit_rate": "1 - confidence_level",
+      "tolerance_band": {
+        "type": "relative",
+        "multiplier": 5
+      }
+    },
+
+    "statistical_backtests": {
+      "tests": [
+        "kupiec_unconditional_coverage",
+        "christoffersen_independence",
+        "christoffersen_conditional_coverage"
+      ],
+      "significance_level": 0.05,
+      "report_rejection_rates": true
+    },
+
+    "regulatory_diagnostics": {
+      "metric": "traffic_light_zone",
+      "aggregation": [
+        "count",
+        "percentage"
+      ]
+    }
+  },
+
+  "tail_risk_analysis": {
+    "var_tail_behavior": {
+      "metrics": [
+        "mean_exceedance",
+        "max_exceedance",
+        "std_exceedance",
+        "quantile_loss_score",
+        "rmse_var_vs_losses"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ]
+    },
+
+    "cvar_tail_behavior": {
+      "metrics": [
+        "cvar_mean_exceedance",
+        "cvar_max_exceedance",
+        "cvar_std_exceedance",
+        "rmse_cvar_vs_losses"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ]
+    }
+  },
+
+  "conditional_volatility_diagnostics": {
+    "volatility_series_metrics": [
+      "sigma_t",
+      "one_step_forecast_sigma"
+    ],
+    "analysis": {
+      "volatility_persistence": {
+        "metric": "alpha_plus_beta",
+        "expected_range": [0.8, 0.99],
+        "flag_extremes": true
+      },
+      "forecast_bias": {
+        "compare": [
+          "sigma_t",
+          "one_step_forecast_sigma"
+        ],
+        "metrics": [
+          "rmse",
+          "mean_error"
+        ]
+      }
+    }
+  },
+
+  "garch_parameter_diagnostics": {
+    "parameters": [
+      "omega",
+      "alpha",
+      "beta",
+      "alpha_plus_beta",
+      "unconditional_variance"
+    ],
+    "stability_checks": {
+      "by_window": true,
+      "metrics": [
+        "mean",
+        "std",
+        "coefficient_of_variation"
+      ]
+    },
+    "stationarity_validation": {
+      "rule": "alpha + beta < 1",
+      "flag_violations": true
+    },
+    "information_criteria": [
+      "aic",
+      "bic",
+      "loglikelihood"
+    ]
+  },
+
+  "distributional_diagnostics": {
+    "assumed_distribution": "student_t",
+    "metrics": [
+      "skewness",
+      "kurtosis",
+      "jarque_bera_p_value"
+    ],
+    "interpretation": {
+      "heavy_tails_expected": true,
+      "normality_rejection_expected": true
+    }
+  },
+
+  "time_sliced_analysis": {
+    "enabled": true,
+    "slice_by": [
+      "year",
+      "quarter"
+    ],
+    "metrics": [
+      "hit_rate",
+      "violation_ratio",
+      "num_violations",
+      "expected_violations",
+      "traffic_light_zone"
+    ],
+    "minimum_observations": 60,
+    "regime_comparison": {
+      "compare_slices": true,
+      "statistics": [
+        "mean_difference",
+        "ratio"
+      ]
+    }
+  },
+
+  "robustness_checks": {
+    "window_sensitivity": {
+      "compare_windows": [252, 500],
+      "metrics": [
+        "hit_rate",
+        "violation_ratio",
+        "rmse_var_vs_losses",
+        "alpha_plus_beta"
+      ]
+    },
+
+    "horizon_scaling_check": {
+      "compare_horizons": [1, 10],
+      "scaling_rule": "sqrt_time",
+      "metrics": [
+        "violation_ratio",
+        "rmse_var_vs_losses"
+      ]
+    }
+  },
+
+  "computational_performance": {
+    "metrics": [
+      "total_runtime_ms",
+      "garch_fit_time_ms",
+      "forecast_time_ms",
+      "cache_hit_ratio"
+    ],
+    "aggregation": [
+      "mean",
+      "median",
+      "p95"
+    ],
+    "report_scalability": true
+  },
+
+  "ranking_and_selection": {
+    "ranking_metrics": [
+      {
+        "metric": "abs(hit_rate - (1 - confidence_level))",
+        "weight": 0.4
+      },
+      {
+        "metric": "violation_ratio",
+        "target": 1.0,
+        "weight": 0.3
+      },
+      {
+        "metric": "rmse_var_vs_losses",
+        "weight": 0.3
+      }
+    ],
+    "output_top_k": 10
+  },
+
+  "outputs": {
+    "summary_tables": {
+      "path": "results/classical_risk/garch_asset_level_analysis_summary.parquet"
+    },
+    "time_sliced_tables": {
+      "path": "results/classical_risk/garch_asset_level_time_sliced_analysis.parquet"
+    },
+    "figures": {
+      "path": "results/classical_risk/figures/",
+      "plots": [
+        "hit_rate_vs_confidence",
+        "violation_ratio_distribution",
+        "alpha_beta_stability",
+        "conditional_volatility_vs_returns",
+        "time_sliced_hit_rate"
+      ]
+    },
+    "report": {
+      "path": "results/classical_risk/garch_asset_level_analysis_report.md",
+      "sections": [
+        "coverage_accuracy_results",
+        "statistical_backtesting",
+        "tail_risk_analysis",
+        "conditional_volatility_dynamics",
+        "garch_parameter_stability",
+        "distributional_diagnostics",
+        "regime_sensitivity",
+        "robustness_checks",
+        "computational_performance",
+        "discussion"
+      ]
+    }
+  }
+}

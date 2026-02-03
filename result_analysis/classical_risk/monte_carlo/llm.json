@@ -1,0 +1,291 @@
+{
+  "analysis_task": "monte_carlo_asset_level_result_analysis",
+
+  "inputs": {
+    "metrics_table": "results/classical_risk/mcs_asset_level_metrics.parquet",
+    "time_sliced_metrics_table": "results/classical_risk/mcs_asset_level_time_sliced_metrics.parquet",
+    "risk_series_table": "results/classical_risk/mcs_asset_var_cvar_series.parquet",
+    "fitted_parameter_store": "cache/mcs_asset_fitted_parameters.parquet"
+  },
+
+  "analysis_scope": {
+    "level": "asset",
+    "method_dimension": "method",
+    "dimensions": [
+      "method",
+      "confidence_level",
+      "horizon",
+      "estimation_window"
+    ],
+    "exclude_portfolio_fields": true
+  },
+
+  "data_validation": {
+    "required_columns": [
+      "method",
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "hit_rate",
+      "violation_ratio"
+    ],
+    "drop_if_missing": [
+      "hit_rate",
+      "violation_ratio"
+    ],
+    "consistency_checks": [
+      {
+        "name": "hit_rate_bounds",
+        "rule": "0 <= hit_rate <= 1"
+      },
+      {
+        "name": "violation_ratio_finite",
+        "rule": "violation_ratio > 0"
+      }
+    ]
+  },
+
+  "primary_evaluation": {
+    "coverage_accuracy": {
+      "metrics": [
+        "hit_rate",
+        "violation_ratio"
+      ],
+      "expected_hit_rate": "1 - confidence_level",
+      "tolerance_band": {
+        "type": "relative",
+        "multiplier": 5
+      },
+      "compare_across_methods": true
+    },
+
+    "statistical_backtests": {
+      "tests": [
+        "kupiec_unconditional_coverage",
+        "christoffersen_independence",
+        "christoffersen_conditional_coverage"
+      ],
+      "significance_level": 0.05,
+      "report_rejection_rates": true,
+      "group_by": [
+        "method",
+        "confidence_level"
+      ]
+    },
+
+    "regulatory_diagnostics": {
+      "metric": "traffic_light_zone",
+      "aggregation": [
+        "count",
+        "percentage"
+      ],
+      "compare_across_methods": true
+    }
+  },
+
+  "tail_risk_analysis": {
+    "var_tail_behavior": {
+      "metrics": [
+        "mean_exceedance",
+        "max_exceedance",
+        "std_exceedance",
+        "quantile_loss_score",
+        "rmse_var_vs_losses"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ],
+      "compare_across_methods": true
+    },
+
+    "cvar_tail_behavior": {
+      "metrics": [
+        "cvar_mean_exceedance",
+        "cvar_max_exceedance",
+        "cvar_std_exceedance",
+        "rmse_cvar_vs_losses"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ],
+      "compare_across_methods": true
+    }
+  },
+
+  "simulation_method_diagnostics": {
+    "method_specific_parameters": {
+      "historical_bootstrap": [
+        "effective_sample_size"
+      ],
+      "parametric_normal": [
+        "window_mu",
+        "window_sigma"
+      ],
+      "parametric_student_t": [
+        "window_mu",
+        "window_sigma",
+        "student_t_df"
+      ],
+      "filtered_ewma_bootstrap": [
+        "ewma_lambda",
+        "effective_sample_size"
+      ]
+    },
+
+    "parameter_stability": {
+      "by_window": true,
+      "metrics": [
+        "mean",
+        "std",
+        "coefficient_of_variation"
+      ]
+    }
+  },
+
+  "distributional_diagnostics": {
+    "metrics": [
+      "skewness",
+      "kurtosis",
+      "jarque_bera_p_value"
+    ],
+    "interpretation": {
+      "parametric_normal": "expect_normality_rejection",
+      "parametric_student_t": "expect_heavy_tails",
+      "bootstrap_methods": "distribution_free"
+    }
+  },
+
+  "time_sliced_analysis": {
+    "enabled": true,
+    "slice_by": [
+      "year",
+      "quarter"
+    ],
+    "metrics": [
+      "hit_rate",
+      "violation_ratio",
+      "num_violations",
+      "expected_violations",
+      "traffic_light_zone"
+    ],
+    "minimum_observations": 60,
+    "compare_across_methods": true,
+    "regime_comparison": {
+      "statistics": [
+        "mean_difference",
+        "ratio"
+      ]
+    }
+  },
+
+  "robustness_checks": {
+    "method_comparison": {
+      "methods": [
+        "historical_bootstrap",
+        "parametric_normal",
+        "parametric_student_t"
+      ],
+      "metrics": [
+        "hit_rate",
+        "violation_ratio",
+        "rmse_var_vs_losses"
+      ]
+    },
+
+    "window_sensitivity": {
+      "compare_windows": [252, 500],
+      "metrics": [
+        "hit_rate",
+        "violation_ratio"
+      ]
+    },
+
+    "horizon_handling_check": {
+      "compare_horizons": [1, 10],
+      "metrics": [
+        "violation_ratio",
+        "rmse_var_vs_losses"
+      ],
+      "note": "Multi-day horizon uses path aggregation; no sqrt-time scaling."
+    }
+  },
+
+  "computational_performance": {
+    "metrics": [
+      "total_runtime_ms",
+      "window_fit_time_ms",
+      "simulation_time_ms",
+      "cache_hit_ratio"
+    ],
+    "aggregation": [
+      "mean",
+      "median",
+      "p95"
+    ],
+    "report_scalability": true,
+    "scaling_dimension": "num_simulations"
+  },
+
+  "ranking_and_selection": {
+    "ranking_metrics": [
+      {
+        "metric": "abs(hit_rate - (1 - confidence_level))",
+        "weight": 0.4
+      },
+      {
+        "metric": "violation_ratio",
+        "target": 1.0,
+        "weight": 0.3
+      },
+      {
+        "metric": "rmse_var_vs_losses",
+        "weight": 0.3
+      }
+    ],
+    "rank_by": [
+      "method",
+      "confidence_level"
+    ],
+    "output_top_k": 5
+  },
+
+  "outputs": {
+    "summary_tables": {
+      "path": "result_analysis/classical_risk/monte_carlo/mcs_asset_level_analysis_summary.parquet"
+    },
+    "time_sliced_tables": {
+      "path": "result_analysis/classical_risk/monte_carlo/mcs_asset_level_time_sliced_analysis.parquet"
+    },
+    "method_comparison_tables": {
+      "path": "result_analysis/classical_risk/monte_carlo/mcs_method_comparison_tables.parquet"
+    },
+    "figures": {
+      "path": "result_analysis/classical_risk/monte_carlo/figures/",
+      "plots": [
+        "hit_rate_by_method",
+        "violation_ratio_by_method",
+        "tail_loss_comparison",
+        "time_sliced_hit_rate_by_method",
+        "var_cvar_time_series_comparison"
+      ]
+    },
+    "report": {
+      "path": "result_analysis/classical_risk/monte_carlo/mcs_asset_level_analysis_report.md",
+      "sections": [
+        "coverage_accuracy_results",
+        "statistical_backtesting",
+        "comparison_of_simulation_methods",
+        "tail_risk_characteristics",
+        "distributional_diagnostics",
+        "regime_sensitivity",
+        "robustness_checks",
+        "computational_performance",
+        "discussion"
+      ]
+    }
+  }
+}
