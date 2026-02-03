@@ -1,0 +1,378 @@
+{
+    "task": "qgan_scenario_generation_asset_level_evaluation_optimized",
+  
+    "design_principle": {
+      "quantum_scope": "asset_level_only",
+      "portfolio_projection": false,
+      "rationale": "Quantum Generative Adversarial Networks (QGAN) are trained per asset to learn the empirical distribution of returns/losses within rolling windows and to generate realistic synthetic scenarios. Generated scenarios are used for asset-level risk assessment (VaR/CVaR estimation and tail diagnostics) without portfolio aggregation. Evaluation includes distributional fidelity, tail preservation, stylized facts, and out-of-sample scenario quality, reported per asset and time-sliced (year/quarter/month) for IEEE Access-grade empirical validation."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/preprocessed/panel_price.parquet",
+      "asset_universe": {
+        "mode": "from_columns",
+        "include": null,
+        "exclude": null
+      }
+    },
+  
+    "data_settings": {
+      "return_type": "log",
+      "loss_definition": "negative_return",
+      "tail_side": "left",
+      "calendar": {
+        "sort_index": true,
+        "drop_duplicate_dates": true,
+        "timezone": null
+      },
+      "missing_data_policy": {
+        "dropna": "per_asset",
+        "min_required_observations": 800
+      },
+      "standardization": {
+        "enabled": true,
+        "method": "robust_zscore",
+        "fit_scope": "per_asset_per_window",
+        "clip_range": [-6.0, 6.0]
+      }
+    },
+  
+    "qgan_settings": {
+      "training_scope": "per_asset_per_window",
+      "rolling": {
+        "enabled": true,
+        "estimation_windows": [252, 500],
+        "step_size": 5,
+        "warmup_policy": "skip_until_window_full",
+        "model_refresh_policy": "retrain_each_step"
+      },
+  
+      "data_representation": {
+        "target_variable": "returns",
+        "distribution_support": {
+          "method": "quantile_clip",
+          "lower_quantile": 0.001,
+          "upper_quantile": 0.999
+        },
+        "discretization": {
+          "enabled": true,
+          "num_bins": 64,
+          "binning_method": "uniform_grid",
+          "notes": "Returns are discretized for generator output mapping; inverse map produces continuous scenarios."
+        }
+      },
+  
+      "generator": {
+        "type": "quantum_generator",
+        "num_qubits": 6,
+        "ansatz": {
+          "type": "hardware_efficient",
+          "layers": 3,
+          "entanglement": "linear",
+          "rotation_gates": ["ry", "rz"]
+        },
+        "latent_distribution": {
+          "type": "uniform_bitstring",
+          "dimension": 6
+        }
+      },
+  
+      "discriminator": {
+        "type": "classical_discriminator",
+        "model_family": "mlp",
+        "hidden_layers": [64, 32],
+        "activation": "relu",
+        "dropout": 0.1,
+        "label_smoothing": 0.0
+      },
+  
+      "optimization": {
+        "adversarial_steps": {
+          "discriminator_steps_per_iter": 1,
+          "generator_steps_per_iter": 1
+        },
+        "optimizer_generator": {
+          "type": "adam",
+          "learning_rate": 0.02,
+          "beta1": 0.9,
+          "beta2": 0.999
+        },
+        "optimizer_discriminator": {
+          "type": "adam",
+          "learning_rate": 0.01,
+          "beta1": 0.9,
+          "beta2": 0.999
+        },
+        "max_iterations": 300,
+        "batch_size": 256,
+        "early_stopping": {
+          "enabled": true,
+          "patience": 30,
+          "min_improvement": 1e-4,
+          "monitor": "generator_loss"
+        },
+        "random_seed": 42
+      },
+  
+      "execution": {
+        "backend": "aer_simulator",
+        "shots": 4096,
+        "measurement_error_mitigation": false
+      },
+  
+      "scenario_generation": {
+        "enabled": true,
+        "num_scenarios_per_timestamp": 10000,
+        "horizons": {
+          "base_horizon": 1,
+          "scaled_horizons": [10],
+          "aggregation_rule": "sum_log_returns",
+          "note": "Multi-step scenarios are formed by aggregating generated 1-step log-return samples."
+        }
+      }
+    },
+  
+    "computation_strategy": {
+      "compute_returns_once": true,
+  
+      "rolling_engine": {
+        "vectorization": "per_asset_loop",
+        "parallelization_axis": ["asset"],
+        "max_workers": "auto",
+        "chunk_assets": 1
+      },
+  
+      "cache": {
+        "enabled": true,
+        "scope": "per_asset_per_window_per_time_index",
+        "store_format": "parquet",
+        "parameter_store_path": "cache/qgan_asset_parameters.parquet",
+        "key_fields": [
+          "asset",
+          "date",
+          "estimation_window",
+          "generator_num_qubits",
+          "ansatz_layers",
+          "shots",
+          "batch_size",
+          "max_iterations",
+          "return_type"
+        ],
+        "write_mode": "append_or_upsert",
+        "cache_hit_ratio_metric": true
+      },
+  
+      "runtime_instrumentation": {
+        "enabled": true,
+        "measure": [
+          "total_runtime_ms",
+          "returns_compute_time_ms",
+          "preprocessing_time_ms",
+          "qgan_training_time_ms",
+          "scenario_generation_time_ms",
+          "risk_compute_time_ms",
+          "evaluation_time_ms",
+          "time_slicing_time_ms"
+        ]
+      },
+  
+      "safety_checks": {
+        "enabled": true,
+        "checks": [
+          {
+            "name": "finite_generated_samples",
+            "rule": "all(isfinite(samples))",
+            "on_fail": "skip_timestamp"
+          },
+          {
+            "name": "variance_sanity",
+            "rule": "0 < var(samples) < 100 * var(real_data)",
+            "on_fail": "flag_and_continue"
+          },
+          {
+            "name": "mode_collapse_detection",
+            "rule": "unique_bin_ratio >= 0.05",
+            "on_fail": "flag_and_continue"
+          }
+        ]
+      }
+    },
+  
+    "evaluation": {
+      "scope": "per_asset",
+      "outputs_granularity": {
+        "scenario_level": true,
+        "series_level": true,
+        "summary_level": true,
+        "time_sliced_level": true
+      },
+  
+      "distribution_fidelity": {
+        "enabled": true,
+        "tests": [
+          "wasserstein_distance",
+          "ks_statistic",
+          "js_divergence",
+          "moment_errors_mean_var_skew_kurt"
+        ],
+        "notes": "Compare generated scenario distribution to real returns within the window and out-of-sample."
+      },
+  
+      "tail_fidelity": {
+        "enabled": true,
+        "confidence_levels": [0.95, 0.99],
+        "metrics": [
+          "var_error",
+          "cvar_error",
+          "tail_mass_error",
+          "extreme_quantile_error"
+        ],
+        "notes": "Tail preservation is assessed by comparing VaR/CVaR from generated scenarios vs realized losses."
+      },
+  
+      "stylized_facts": {
+        "enabled": true,
+        "metrics": [
+          "volatility_clustering_proxy",
+          "acf_squared_returns_lag1_5",
+          "leptokurtosis_gap",
+          "downside_skew_preservation"
+        ]
+      },
+  
+      "time_sliced_metrics": {
+        "enabled": true,
+        "slice_by": ["year", "quarter", "month"],
+        "minimum_observations_per_slice": 60,
+        "metrics": [
+          "wasserstein_distance",
+          "ks_statistic",
+          "var_error",
+          "cvar_error",
+          "moment_errors_mean_var_skew_kurt"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "fidelity": [
+        "wasserstein_distance",
+        "ks_statistic",
+        "js_divergence",
+        "moment_error_mean",
+        "moment_error_var",
+        "moment_error_skew",
+        "moment_error_kurt"
+      ],
+  
+      "tail_behavior": [
+        "var_error_95",
+        "var_error_99",
+        "cvar_error_95",
+        "cvar_error_99",
+        "tail_mass_error_95",
+        "tail_mass_error_99"
+      ],
+  
+      "quantum_specific": [
+        "generator_circuit_depth",
+        "generator_circuit_width",
+        "shots",
+        "num_qubits",
+        "generator_loss_trace",
+        "discriminator_loss_trace",
+        "mode_collapse_score"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "runtime_per_asset_ms",
+        "mean_training_time_ms",
+        "p95_training_time_ms",
+        "scenario_generation_time_ms",
+        "cache_hit_ratio"
+      ]
+    },
+  
+    "outputs": {
+      "parameter_store": {
+        "path": "cache/qgan_asset_parameters.parquet",
+        "contents": [
+          "asset",
+          "date",
+          "estimation_window",
+          "num_qubits",
+          "ansatz_layers",
+          "shots",
+          "max_iterations",
+          "batch_size",
+          "generator_final_loss",
+          "discriminator_final_loss",
+          "fit_success"
+        ]
+      },
+  
+      "scenario_store": {
+        "path": "results/quantum_risk/qgan_asset_scenarios.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_date_x_scenario_id_x_horizon",
+        "contents": [
+          "asset",
+          "date",
+          "scenario_id",
+          "horizon",
+          "generated_return",
+          "generated_loss"
+        ],
+        "notes": "Stores generated scenarios; consider partitioning by asset/date for large-scale runs."
+      },
+  
+      "risk_series_store": {
+        "path": "results/quantum_risk/qgan_asset_var_cvar_from_scenarios.parquet",
+        "format": "parquet",
+        "contents": [
+          "asset",
+          "date",
+          "confidence_level",
+          "horizon",
+          "estimation_window",
+          "VaR_generated",
+          "CVaR_generated"
+        ]
+      },
+  
+      "metrics_table": {
+        "path": "results/quantum_risk/qgan_asset_level_metrics.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_window_x_qubits_x_layers",
+        "notes": "Aggregated fidelity and tail-preservation metrics per asset and configuration."
+      },
+  
+      "time_sliced_metrics_table": {
+        "path": "results/quantum_risk/qgan_asset_level_time_sliced_metrics.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_slice_type_x_slice_value_x_window_x_qubits_x_layers"
+      },
+  
+      "report": {
+        "path": "results/quantum_risk/qgan_asset_level_report.md",
+        "include_sections": [
+          "quantum_methodology_overview",
+          "data_preprocessing_and_discretization",
+          "qgan_architecture_and_training",
+          "scenario_generation_protocol",
+          "distribution_and_tail_fidelity_results",
+          "stylized_facts_validation",
+          "time_sliced_regime_analysis",
+          "runtime_and_scalability",
+          "key_insights"
+        ]
+      }
+    },
+  
+    "paper_usage_notes": {
+      "simulation_phase": "Use this configuration to train QGANs per asset on rolling windows and generate large scenario sets for tail-risk estimation. Compare fidelity and tail preservation against classical generative baselines and Monte Carlo sampling from fitted parametric distributions.",
+      "paper_phase": "For paper figures, highlight scenario distribution alignment (Wasserstein/KS), tail preservation (VaR/CVaR error), and regime sensitivity via time-sliced metrics. Discuss circuit depth/qubits vs. fidelity trade-offs and computational overhead."
+    }
+  }
+  

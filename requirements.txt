@@ -19,3 +19,8 @@ joblib>=1.3.0  # Parallel processing and caching (alternative to multiprocessing
 # Visualization dependencies (optional, for report generation and analysis)
 matplotlib>=3.7.0  # Plotting and visualization
 seaborn>=0.12.0  # Statistical data visualization
+
+# Quantum Risk Assessment dependencies (QAE for VaR/CVaR)
+qiskit>=1.0.0  # Quantum circuit framework
+qiskit-aer>=0.13.0  # Aer simulator for circuit execution
+qiskit-algorithms>=0.3.0  # Iterative Amplitude Estimation

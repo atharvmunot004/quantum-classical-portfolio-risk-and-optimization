@@ -1,0 +1,322 @@
+{
+    "task": "qaoa_cvar_asset_level_risk_assessment_optimized",
+  
+    "design_principle": {
+      "quantum_scope": "asset_level_only",
+      "portfolio_projection": false,
+      "rationale": "QAOA is used as a quantum optimization routine to produce CVaR-sensitive decisions strictly at the individual-asset level (no portfolio aggregation). For each asset and rolling window, a discretized tail-loss objective is encoded as a cost Hamiltonian and optimized using CVaR-based sampling of measurement outcomes. Outputs include per-asset CVaR-risk series, tail-event diagnostics, and quantum-specific performance metrics to support IEEE Access-grade empirical evaluation."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/preprocessed/panel_price.parquet",
+      "asset_universe": {
+        "mode": "from_columns",
+        "include": null,
+        "exclude": null
+      }
+    },
+  
+    "data_settings": {
+      "return_type": "log",
+      "loss_definition": "negative_return",
+      "tail_side": "left",
+      "calendar": {
+        "sort_index": true,
+        "drop_duplicate_dates": true,
+        "timezone": null
+      },
+      "missing_data_policy": {
+        "dropna": "per_asset",
+        "min_required_observations": 800
+      }
+    },
+  
+    "quantum_risk_settings": {
+      "risk_measure": "CVaR",
+      "confidence_levels": [0.95, 0.99],
+  
+      "objective_definition": {
+        "type": "cvar_tail_objective",
+        "tail_variable": "loss",
+        "aggregation": "mean_of_worst_alpha_tail",
+        "notes": "Objective is the mean of the worst (1-alpha) fraction of sampled loss outcomes. This CVaR objective is evaluated from QAOA measurement samples during optimization."
+      },
+  
+      "estimation_windows": [252, 500],
+  
+      "rolling": {
+        "enabled": true,
+        "step_size": 1,
+        "warmup_policy": "skip_until_window_full",
+        "risk_series_mode": "rolling_time_series"
+      },
+  
+      "random_seed": 42
+    },
+  
+    "problem_encoding": {
+      "encoding_type": "binary_tail_risk_encoding",
+      "num_state_qubits": 8,
+  
+      "loss_discretization": {
+        "method": "quantile_grid",
+        "num_levels": 256,
+        "clip_quantiles": [0.001, 0.999],
+        "rescale_to_unit_interval": true
+      },
+  
+      "cost_hamiltonian": {
+        "form": "ising",
+        "construction": "from_discretized_loss_objective",
+        "penalties": {
+          "enabled": false,
+          "notes": "No portfolio constraints; penalties remain disabled for pure asset-level risk scoring."
+        }
+      },
+  
+      "mixer_hamiltonian": {
+        "type": "x_mixer",
+        "notes": "Standard transverse-field X mixer for unconstrained binary search space."
+      }
+    },
+  
+    "qaoa_settings": {
+      "ansatz": {
+        "type": "qaoa",
+        "reps_grid": [1, 2, 3],
+        "initial_point": "zeros"
+      },
+  
+      "cvar_sampling": {
+        "enabled": true,
+        "alpha_grid": [0.95, 0.99],
+        "definition": "CVaR over measurement outcomes of the cost Hamiltonian"
+      },
+  
+      "optimizer": {
+        "type": "cobyla",
+        "maxiter": 200,
+        "tol": 1e-4,
+        "seed": 42
+      },
+  
+      "execution": {
+        "backend": "aer_simulator",
+        "shots": 4000,
+        "parameterized_circuit_reuse": true,
+        "measurement_error_mitigation": false
+      },
+  
+      "stopping_criteria": {
+        "patience": 20,
+        "min_improvement": 1e-4
+      }
+    },
+  
+    "computation_strategy": {
+      "compute_returns_once": true,
+  
+      "rolling_engine": {
+        "vectorization": "per_asset_loop",
+        "parallelization_axis": ["asset"],
+        "max_workers": "auto",
+        "chunk_assets": 1
+      },
+  
+      "cache": {
+        "enabled": true,
+        "scope": "per_asset_per_window_per_confidence_per_time_index_per_reps",
+        "store_format": "parquet",
+        "parameter_store_path": "cache/qaoa_asset_parameters.parquet",
+        "key_fields": [
+          "asset",
+          "date",
+          "estimation_window",
+          "confidence_level",
+          "num_state_qubits",
+          "reps",
+          "optimizer",
+          "shots",
+          "tail_side",
+          "return_type"
+        ],
+        "write_mode": "append_or_upsert",
+        "cache_hit_ratio_metric": true
+      },
+  
+      "runtime_instrumentation": {
+        "enabled": true,
+        "measure": [
+          "total_runtime_ms",
+          "returns_compute_time_ms",
+          "loss_discretization_time_ms",
+          "hamiltonian_build_time_ms",
+          "qaoa_optimize_time_ms",
+          "cvar_eval_time_ms",
+          "backtesting_time_ms",
+          "time_slicing_time_ms"
+        ]
+      },
+  
+      "safety_checks": {
+        "enabled": true,
+        "checks": [
+          {
+            "name": "cvar_nonnegative",
+            "rule": "CVaR >= 0",
+            "on_fail": "flag_and_continue"
+          },
+          {
+            "name": "cvar_monotonicity",
+            "rule": "CVaR_99 >= CVaR_95",
+            "on_fail": "flag_and_continue"
+          },
+          {
+            "name": "optimizer_convergence",
+            "rule": "optimizer_success == true",
+            "on_fail": "flag_and_continue"
+          }
+        ]
+      }
+    },
+  
+    "evaluation": {
+      "scope": "per_asset",
+      "outputs_granularity": {
+        "series_level": true,
+        "summary_level": true,
+        "time_sliced_level": true
+      },
+  
+      "backtesting": {
+        "enabled": true,
+        "tests": [
+          "hit_rate",
+          "violation_ratio",
+          "traffic_light_zone"
+        ],
+        "notes": "For asset-level CVaR, exceedances are defined as realized losses exceeding the estimated CVaR threshold proxy, with diagnostic hit-rates computed per asset."
+      },
+  
+      "time_sliced_metrics": {
+        "enabled": true,
+        "slice_by": ["year", "quarter", "month"],
+        "minimum_observations_per_slice": 60,
+        "metrics": [
+          "num_exceedances_vs_cvar",
+          "exceedance_rate_vs_cvar",
+          "mean_exceedance_given_cvar",
+          "max_exceedance_given_cvar"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "accuracy": [
+        "num_exceedances_vs_cvar",
+        "exceedance_rate_vs_cvar",
+        "mean_exceedance_given_cvar",
+        "max_exceedance_given_cvar"
+      ],
+  
+      "tail_behavior": [
+        "tail_mean_loss",
+        "tail_max_loss",
+        "rmse_cvar_vs_losses"
+      ],
+  
+      "quantum_specific": [
+        "best_energy",
+        "best_parameters",
+        "energy_trace_slope",
+        "cvar_value_trace",
+        "num_function_evaluations",
+        "circuit_depth",
+        "circuit_width",
+        "reps",
+        "shots"
+      ],
+  
+      "distribution": [
+        "skewness",
+        "kurtosis",
+        "jarque_bera_statistic",
+        "jarque_bera_p_value"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "runtime_per_asset_ms",
+        "mean_qaoa_optimize_time_ms",
+        "p95_qaoa_optimize_time_ms",
+        "cache_hit_ratio"
+      ]
+    },
+  
+    "outputs": {
+      "parameter_store": {
+        "path": "cache/qaoa_asset_parameters.parquet",
+        "contents": [
+          "asset",
+          "date",
+          "estimation_window",
+          "confidence_level",
+          "reps",
+          "num_state_qubits",
+          "optimizer",
+          "shots",
+          "best_energy",
+          "best_parameters",
+          "optimizer_success"
+        ]
+      },
+  
+      "risk_series_store": {
+        "path": "results/quantum_risk/qaoa_asset_cvar_series.parquet",
+        "format": "parquet",
+        "contents": [
+          "asset",
+          "date",
+          "confidence_level",
+          "estimation_window",
+          "reps",
+          "CVaR",
+          "best_energy",
+          "nfev"
+        ]
+      },
+  
+      "metrics_table": {
+        "path": "results/quantum_risk/qaoa_asset_level_metrics.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_confidence_x_window_x_reps",
+        "notes": "Aggregated CVaR-tail diagnostics and QAOA optimization performance per asset and configuration."
+      },
+  
+      "time_sliced_metrics_table": {
+        "path": "results/quantum_risk/qaoa_asset_level_time_sliced_metrics.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_slice_type_x_slice_value_x_confidence_x_window_x_reps"
+      },
+  
+      "report": {
+        "path": "results/quantum_risk/qaoa_asset_level_report.md",
+        "include_sections": [
+          "quantum_methodology_overview",
+          "qaoa_cost_and_mixer_construction",
+          "cvar_based_sampling_and_objective",
+          "optimization_convergence_and_stability",
+          "backtesting_and_tail_diagnostics",
+          "time_sliced_tail_behavior",
+          "quantum_vs_classical_runtime_comparison",
+          "key_insights"
+        ]
+      }
+    },
+  
+    "paper_usage_notes": {
+      "simulation_phase": "Use this configuration to benchmark CVaR-aware QAOA optimization as an asset-level tail-risk scoring tool across rolling windows. Compare against EVT, GARCH, Monte Carlo, and QAE-based CVaR baselines using consistent backtesting diagnostics.",
+      "paper_phase": "For paper results, emphasize convergence stability across reps, sample-based CVaR estimation variance, and circuit complexity vs. marginal tail-risk estimation improvements over classical baselines."
+    }
+  }
+  
