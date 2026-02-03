@@ -1,0 +1,483 @@
+\documentclass[conference]{IEEEtran}
+
+% Optional packages
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+
+\begin{document}
+
+\title{Your Paper Title Goes Here}
+
+\author{
+\IEEEauthorblockN{Author Name}
+\IEEEauthorblockA{Department / Institute \\
+Email: author@example.com}
+}
+
+\maketitle
+
+\begin{abstract}
+This is a sample abstract. It should summarize your work concisely.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Quantum finance, Hybrid architectures, Portfolio optimization, Value-at-Risk, Amplitude estimation
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Due to Regime Shifts, Non-Stationarity, and High-Dimensional Dependencies; Modern financial markets require reliable modeling frameworks. Beginning with Markowitz's mean-variance optimization [1], Traditional Portfolio theory accepted diversification as a quantitative foundation for risk-efficient allocation. There have been major improvements such as Black-Letterman equilibrium model [2], resampling techniques that reduce instability [3], shrinkage estimators or noisy covariance matrices [4], and risk-parity allocations [5]; Yet, despite of all improvements classical approaches struggle in cases of abrupt changes in market conditions or in case of unstable data. This introduces a broader challenge, that is, any single modelling paradigm whether classical, machine learning or quantum fails to stay robust across all market regimes. This calls for the need for a hybrid architecture that is capable of evaluating and selecting tools dynamically on the basis of market context.
+
+Even after signifcant developments which helped strengthen the portolio optimization,  modelling tail risk and non-linear downside exposure still remains a critical challenge. A coherent, optimization friendly alternative to VaR, emerged as Conditional Value-at-Risk (CVaR). Rockafellar and Uryasev demonstarted how CVaR can be embedded into convex optimizing programs [6]. Its relevance to realistic market settings chategorized by fat tails and regime-shifts was expanded by further generalizations to arbitrary loss distributions [7]. To estimate risk in dyanmic environments classical risk-modelling approaches including parametric VaR [14], Monte Carlo simulation, and GARCH-family volatility models have been used parallely [15, 16]. Yet, when dealing with high-dimensional portfolios or highly non-linear dependence structures, these tools face scaling and performance bottlenecks.
+A potential paradigm shift for risk and portfolio analytics is suggested by recent progress in quantum computing. Quantum routines for spectral estimation and dimensionality reduction are introduced by foundational methods such as Quantum PCA (qPCA) [8] and its low complexity variants [9]. Building on these ideas, the use of quantum algorithms, such as amplitude estimation, to accelerate Monte Carlo-style risk evaluation and improve precision for tail risk estimation is motivated by early conceptual frameworks for quantum risk modelling [10-13]. Meanwhile, quantum-optimization research has explored mapping financial portfolio problems to QUBO formulations suitable for quantum hardware [17], as well as early demonstrations of quantum mean-variance optimization and QAOA-based routines within the Qiskit Finance ecosystem [18]. These developments sound promising but systematic evaluation to determine where quantum advantages may be practical, contextual, or merely theoretical is required.
+Simultaneously, hybrid AI-based workflows are becoming increasingly relevant for financial simulation and scenario generation.the arrival of data-driven risk-estimation frameworks that may go with or compete with classical and quantum approaches are highlighted by neural generative models, such as GAN-based synthetic financial scenario generators [19].
+Under regime shifts, structural breaks, and tail-dominated markets, classical methods continue to face instability, despite of  considerable progress in risk modelling and portfolio theory; from the foundations of mean-variance optimization [1], equilibrium-based allocation [2], and study of estimation error in optimized portfolios [3], to improved covariance estimation [4] and risk-contribution allocation frameworks [5]. Greater robustness is offered by consistent risk measure such ad CVaR [6, 7] and widely used techniques like e parametric VaR, GARCH-based volatility modelling, Monte Carlo estimation, and tail-risk diagnostics [14-16], but they still show display sensitivity to non - stationary and high-dimensional dependencies.
+Promising but still untested pathways for accelerating or stabilizing financial analytics are highlighted by parallel developments in quantum computing including quantum PCA [8, 9], quantum risk-analysis frameworks [10-13], quantum-optimization and annealing methods [17, 18], and generative quantum models for financial scenarios [19-23]. Yet, the field lacks a unified, comparitive architecture to consistently evaluate the classical, machine learning and quantum approaches under heterogeneous market regimes, which clarifies when and why a specific method should be preferred.
+This inspires the objective of this project, which is to develop a regime-aware evaluation framework that systematically benchmarks risk-assessment methods including VaR, CVaR, GARCH volatility, Monte Carlo, quantum amplitude-estimation-based risk measures, and variational quantum risk models along with portfolio-optimization techniques such as mean-variance optimization, Black-Litterman allocations, risk-parity constructions, CVaR-based optimization, and quantum-optimization routines which range from QAOA to quantum mean-variance formulations [24-50].The aim of this architecture is to determine performance of classical, machine learning and quantum techniques across various market conditions, by shifting focus from predictive trading to comparitive behaviour, to ultimately enable principled tool selection and interpretable hybrid AI-quant workflows.
+
+\section{Literature review}
+By combining econometrics, machine learning, stochastic
+modeling, and quantum algorithms risk assessment and portfolio optimization have
+evolved into deeply interconnected research areas. Classical founda-
+tions such as Markowitz's portfolio theory [1], co-
+variance regularization methods [4], and risk-based
+allocations [5] continue to inform modern quantitative
+frameworks. Similarly, much
+of today's risk-aware portfolio construction pipelines are shaped by the seminal CVaR optimization
+results by Rockafellar and Uryasev [6], [7].
+More recently,alternative paradigms for dimensionality reduction,
+generative modeling, and optimization [8]-[13], [17],
+[18] have been introduced by quantum computation.
+\subsection{Risk Assessment \& Financial Forecasting}
+New pathways for risk modeling are opened by the recent progress in quantum-enhanced feature extraction. A self-adaptive Quantum Kernel PCA technique capable of compactly encoding complex correlations in financial datasets is introduced by Wang et al. [20]. Complementing feature extraction,an importance-sampling Monte Carlo method for CVaR estimation that improves tail-probability estimation efficiency [21], aligning with earlier CVaR theory [6], [7] is proposed by Jiang et al. 
+Generative modeling has also emerged as a major theme. A Quantum Generative Model (QGM) for multivariate financial time series, that demonstartes improved temporal coherence over classical GANs [22] is developed by Dechant et al. Similarly, quantum-enhanced Wasserstein GANs for realistic S\&P 500 synthetic data, which extends prior conceptual work in GAN-based scenario synthesis [19] is applied by [23].
+Hybrid volatility-forecasting models remain central to risk assessment. Multi-step volatility predictions is improved by the integrated GARCH-GRU architecture in [24] by merging econometric structure with deep learning .Hybrid GARCH models across regimes are evaluated by Huang et al.[25] , while multiple risk-forecast evaluation techniques are benchmarked by Giot and Laurent [26]. Models such as Dynamic Threshold Exceedance [27], Robust Range-Based GARCH [28], and Extreme-Value Regression approaches [29] address the measures of extreme risk measures. Benito et al. [30] and Li et al. [31] introduce further improvements to tail-probability estimation, who integrate copula-based VaR under stressed market conditions.
+Increasing trend toward EVT-hybrid and high-frequency risk-estimation methods are also highlighted by the literature. Hawkes-driven Peaks-over-Threshold EVT models for clustered extreme events  are integrated by Tomlinson et al.[32] , while how realized variance improves the identification of extreme thresholds is demonstrated Bee et al. (Realized POT) [33]. Volatility transitions between calm and turbulent markets is captured by Markov Regime-Switching GARCH models [34].
+Methodological advances also extend to analytical VaR transformations. A novel parametric framework for approximating nonlinear loss distributions is proposed by Prakash et al.  [35]. GAN-based scenario generation for market-risk simulation is further expanded by Flaig et al. [36]. Finally,quantum amplitude estimation (QAE) with Monte Carlo VaR, demonstrating quantum-accelerated sampling capabilities, grounded in earlier conceptual QAE frameworks [10], [11] is integrated by Zhang et al. [37].
+Together,  a comprehensive foundation for modern, data-driven, and quantum-enhanced risk estimation are established by papers [20]-[37] , bridging classical methods with next-generation computational tools.
+\subsection{ Portfolio Optimization (Quantum \& Classical)}
+Foundational techniques such as mean-variance optimization [1], Black-Litterman models [2], and risk-parity formulations [5] remain relevant, but new organizational pipelines are incresingly shaped by quantum methods. A multi-objective portfolio-optimization scheme on D-Wave quantum annealers, that demonstrates benefits for sparse, combinatorial allocation problems is introduced by Fung et al. [38]. Similarly, QAOA and quantum annealing for portfolio rebalancing are explored by Hodson et al. and Rosenberg et al. [39], [40], extending earlier research on QUBO formulations for financial optimization [17].
+On the classical side, MIQP formulation for mean-variance-VaR optimization is proposed by Cesarone et al. [41], integrating downside risk into structured optimization. Quantum derivative-pricing models is investigated by Martin et al. , providing insights into applying quantum circuits for stochastic valuation [42].
+A shift toward hybrid classical-quantum optimization workflows is illustrated by these works, consistent with frameworks documented in Qiskit Finance [18] and conceptual quantum-financial models [13].
+\subsection{Papers Contributing to BOTH Risk \& Portfolio Optimization}
+The studies that specifically connect risk modelling, sampling efficiency and optimization performance, formed the foundation for quantum-classical hybrid hedge fund architectures. The classical Rockafellar-Uryasev paradigm [6] extended by the quantum subgradient-estimation method or CVaR  optimization [43] enabled differentiable CVaR optimization on quantum hardware. Design choices for real-world quantum workflows are informed by benchmarking studies including noisy digital simulations for portfolio optimization [44] and QAOA performance evaluations [45].
+Advancements in sampling and integration also supported both risk and portfolio-construction tasks. Considerable variance-reduction benefits are offered by Quantum Monte Carlo integration frameworks [46] and Real Quantum Amplitude Estimation techniques [47], which are critical for VaR, CVaR, and expected-return estimation. CVaR-based VQO enhancements [48] introduced improvements in variational optimization, and the objective-function evolution framework of Kolotouros et al. [49].
+Within applied finance,  an improved CVaR-based QAOA for portfolio optimization is demonstrated by Zhang et al. [50], that builds upon Ledoit-Wolf covariance regularization [4] and earlier critiques of estimation instability in optimized portfolios [3].
+
+Collectively, papers [43]-[50] create a unified bridge between risk estimation, optimization theory, and quantum-classical algorithmic design, providing the necessary building blocks for integrated, risk-aware portfolio architectures.
+
+Even though considerable progress has been made in classical portfolio theory [1]-[5], CVaR optimization [6], [7], quantum dimensionality reduction [8], [9], and emerging quantum finance frameworks [10]-[13]; several unresolved gaps are revealed by existing literature that motivate this study. First, risk estimation and portfolio optimization remain largely isolated research areas as quantum PCA-based factor extraction [20], quantum generative time-series models [22], quantum Monte Carlo VaR estimation [29], and deep-learning-enhanced volatility models [23], [25], [35] have been studied separately from quantum and hybrid portfolio optimization methods such as QAOA, quantum annealing, and variational formulations [38]-[40], [48]-[50]. No work has provided an end-to-end hybrid pipeline that combines quantum-enhanced risk estimation with dynamic, risk-constrained portfolio optimization in a feedback loop. Additionally, empirical validations remain limited, with little benchmarking against advanced classical EVT, GARCH, and hybrid forecasting models [23], [27], [30], [33], [36], even though quantum amplitude estimation (QAE) and its variants show theoretical promise for accelerating tail-risk estimation [29], [45], [46]. Feature engineering for risk modeling concern another gap ,while alternative representations of market structure have been offered by quantum kernel PCA [20], quantum generative scenarios [22], [24], and GAN-based market simulations [37] , none have been integrated with econometric or deep-learning volatility models to assess whether quantum-derived features improve tail-risk forecasts. More broadly, classical, deep learning, and quantum risk pipelines under identical datasets and market conditions are not compared by any standardized framework despite of numerous independent advances in GARCH variants [25], [28], regime-switching models [35], copula-based VaR estimation [32], and dynamic exceedance models [27].
+
+Major limitations are also exhibited by quantum portfolio optimization research. Despite the availability of robust risk models in the classical literature [6], [26], [30], in order to omit real-world risk constraints such as CVaR limits, downside budgets, or regime-specific volatility inputs, current QAOA, annealing-based, and VQO models [38]-[40], [47]-[50] typically rely on simplified Markowitz or QUBO formulations. Moreover, system-level feasibility of hybrid pipelines, where data preprocessing, risk estimation, optimization, and rebalancing must operate under real-time latency, noise, and scalability constraints [44], are not assessed by existing quantum optimization studies. Finally, synthetic data generation frameworks, both quantum [22], [24] and classical GAN-based [19], [37], have been  rarely evaluated for downstream tasks such as stress-testing risk models or improving optimization robustness. Likewise, there has been no systematic comparison of  quantum CVaR-based subgradient and variational optimization techniques [43], [48]-[50] with classical machine-learning optimizers such as stochastic gradient or reinforcement-learning approaches. Collectively, the absence of an integrated, empirically validated, quantum-classical architecture for risk assessment and portfolio optimization that combines econometrics, deep learning, and quantum computation into a coherent, operational framework is demonstarted by these gaps.
+
+\section{Proposed Methodology}
+
+This study develops an integrated Classical--Quantum Risk Assessment and Portfolio Optimization Framework. The proposed methodology covers data preprocessing, large-scale portfolio construction, classical tail-risk models, quantum algorithms for risk estimation and scenario generation, and optimized hybrid workflows. All empirical results are benchmarked using rolling-window out-of-sample backtesting and statistically rigorous accuracy tests [51].
+
+\subsection{Data Preprocessing Pipeline}
+
+The dataset consists of 10 years of daily OHLCV (open, high, low, close, volume) data for 10 diversified Indian equities. Each equity time series is stored as an independent CSV file. The preprocessing pipeline ensures consistency, comparability across assets, and compatibility with quantum state preparation requirements [51].
+
+\subsubsection{Cleaning and Missing Value Handling}
+
+Time-series linear interpolation is used to impute missing observations without distorting volatility patterns. Adjusted closing prices are used throughout so that corporate actions such as stock splits, dividends, and bonus issues are normalized in a consistent manner [51].
+
+\subsubsection{Log-Return Transformation}
+
+Asset returns are computed as:
+\begin{equation}
+r_t = \ln\left(\frac{P_t}{P_{t-1}}\right)
+\end{equation}
+
+The above formula defines continuously compounded return (log return) for a financial asset. 
+\begin{itemize}
+\item $r_t$: the return for the period ending at time t (often daily).
+\item $\ln$: The natural logarithm function (logarithm to the base e).
+\item $P_t$: The price of asset at time t.
+\item $P_{t-1}$: The price of asset at time t-1.
+\end{itemize}
+The use of log-returns stabilizes variance, ensures additivity across time, and provides a numerically well-behaved representation suitable for risk modeling and portfolio aggregation [66, \textit{Chapter 2}].
+
+\subsubsection{Rolling Estimation Window}
+
+A 252-day rolling estimation window is employed for the computation of covariance matrices, estimation of GARCH parameters, and extraction of distributional features. This choice is consistent with standard financial econometric practice and provides realistic out-of-sample evaluation conditions [51, 52].
+
+\subsubsection{Normalization for Quantum Encoding}
+
+For quantum-compatible processing, classical return data are normalized depending on the encoding scheme used:
+
+\begin{itemize}
+    \item Amplitude encoding: returns are rescaled to the interval $[0,1]$
+    \item Basis encoding: discretized return bins are mapped to computational basis states
+\end{itemize}
+
+This step ensures that quantum state preparation constraints are respected and that the encoded distributions remain physically realizable on quantum hardware [53].
+
+\subsection{Portfolio Generation via Dirichlet Distribution}
+
+To evaluate robustness across a wide range of asset allocations, we generate 100{,}000 long-only, fully-invested portfolios. Portfolio weights must satisfy non-negativity, full investment, and diversification constraints. The Dirichlet distribution is used as the primary sampling mechanism as it naturally enforces these conditions.
+
+The weight sampling process is defined as:
+\begin{equation}
+w \sim \text{Dirichlet}(\alpha)
+\end{equation}
+
+The above equation denotes the random vector $w$ that follows Dirichlet Distribution. Dirichlet Distribution is a multivariate generalization of Beta distribution. It is parameterized by vector alpha $α$ of positive numbers; that is used to model probabilities or proportions that sum to 1. A symmetric parameter choice of $\alpha = 1$ produces a uniform distribution over the weight simplex. Dirichlet sampling therefore provides an unbiased and constraint-preserving approach to large-scale portfolio generation [67, \textit{Section 3.2}].
+
+\subsection{Classical Risk Models}
+
+Several established classical risk estimation techniques are implemented to serve as benchmarks for quantum algorithms.
+
+\subsubsection{Variance--Covariance Parametric VaR}
+
+Under the assumption of normally distributed portfolio returns, parametric Value-at-Risk is computed using:
+\begin{equation}
+\text{VaR}_\alpha = \mu_p + z_\alpha \sigma_p
+\end{equation}
+
+The above formula is used to calculate the $Value$ $at$ $Risk$ $(VaR)$ of a portfolio under the assumption of a normal distribution of returns. 
+\begin{itemize}
+\item $VaR_\alpha$: Value at Risk at $\alpha$ confidence level. It represents the minimum loss taht can be expected to exceed with a probability of $\alpha$. 
+\item $\mu_p$: The expected/ mean return of the portfolio over a given time horizon.
+\item $z_\alpha$: The quantile/ z score corresponding to desired confidence level $alpha$ from standard normal distribution. the vaue of negative 
+\item $\sigma_\alpha$: The standard deviation of portfolio returns for a given time. 
+\end{itemize}
+ This formulation follows the widely adopted RiskMetrics framework for short-horizon risk estimation [68, \textit{Chapter 7}].
+
+The portfolio mean and volatility used above are defined as:
+\begin{equation}
+\mu_p = w^\top \mu
+\end{equation}
+The above portfolio is a fundamental formula in Modern Portfolio Theory that calculates the expected return of a Portfolio
+\begin{itemize}
+\item $\mu_p$: Expected Return of the Portfolio
+\item $w$: Column Vecotr for Portfolio Weights, where each element $w_i$ is the proportion of the total investments allocated to asset $i$.  
+\item The superscript $\top$ denotes the transpose operation, making $w^\top$ a row vector. 
+\end{itemize}
+
+\begin{equation}
+\sigma_p = \sqrt{w^\top \Sigma w}
+\end{equation}
+The above equation is given for Standard Deviation (volatility) in Markowitz Framework (Modern Portfolio Theory) [1, \textit{Section 2}]
+\begin{itemize}
+\item $\sigma_p$: This is the Standard Deviation of Portfolio Returns. 
+\item $w$: Column Vector for Portfolio Weights, where each element $w_i$ is the proportion of the total investments allocated to asset $i$.  
+\item The superscript $\top$ denotes the transpose operation, making $w^\top$ a row vector
+\item $\Sigma$: Covariance matrix of Asset Returns. 
+\end{itemize}
+
+\subsubsection{Monte Carlo Simulation for VaR and CVaR}
+
+Given $N$ simulated multivariate return scenarios $R_i$, portfolio losses are first computed as:
+\begin{equation}
+L_i = -w^\top R_i
+\end{equation}
+In the context of the above mentioned equation, the variables are defined as:
+\begin{itemize}
+\item $L_i$: The negative return (loss) for the $i^{\text{th}}$ scenario generated by the Monte Carlo simulation.
+\item $w$: A Vector of portfolio weights.
+\item $R_i$: A vector of returns for the various assets in the portfolio for the $i^{\text{th}}$ simulated scenario
+\end{itemize} 
+
+Thus, based on the empirical loss distribution, Monte Carlo VaR is obtained as
+\begin{equation}
+\text{VaR}_\alpha = \text{Quantile}_\alpha(L)
+\end{equation}
+where the above defined equations are mentioned as:
+\begin{itemize}
+ \item $L$ (Loss Distribution): This is a random variable representing the potential losses (or negative returns) of a portfolio or asset over a specified time horizon.
+ \item $\alpha$ (Confidence Level): This value is typically close to 1, such as $0.95$ (95\%) or $0.99$ (99\%).
+ \item Quantile$_\alpha(L)$: This refers to the value $l$ such that the probability of the loss $L$ being less than or equal to $l$ is $\alpha$.
+  \begin{itemize}
+    \item Mathematically: $P(L \le l) = \alpha$.
+    \item The VaR is the smallest number $l$ that satisfies $P(L > l) \le 1 - \alpha$.
+  \end{itemize}
+\end{itemize}
+
+
+And thus based on empirical loss distribution, Conditional Value-at-Risk (CVaR) is defined as
+\begin{equation}
+\text{CVaR}_\alpha = \mathbb{E}[L \mid L \ge \text{VaR}_\alpha]
+\end{equation}
+
+\begin{itemize}
+\item {$\mathrm{CVaR}_\alpha$ (Conditional Value-at-Risk):} 
+Also known as Expected Shortfall (ES), Tail VaR (TVaR), or Expected Tail Loss (ETL). It is a coherent risk measure that quantifies the expected loss given that the loss exceeds the VaR threshold.
+\item {$\mathbb{E}[\cdot]$ (Expected Value):} 
+The mathematical expectation operator, representing the average or mean value of a random variable.
+\item {$L$ (Loss):} 
+A random variable representing the potential loss of a portfolio or investment.
+\item {$\mathrm{VaR}_\alpha$ (Value-at-Risk):} 
+The maximum potential loss that can occur with a given confidence level (or probability) $\alpha$. For example, a $95\%$ VaR of \$1 million means there is a $5\%$ chance of losing more than \$1 million.
+\item {$L \ge \mathrm{VaR}_\alpha$ (The condition):} 
+This specifies that the expected value is calculated \emph{only} for the outcomes where the loss $L$ is greater than or equal to the $\mathrm{VaR}_\alpha$ threshold.
+\end{itemize}
+
+CVaR captures the expected magnitude of tail losses beyond the VaR threshold and satisfies coherence properties, making it suitable for tail-risk-sensitive optimization 
+Monte Carlo methods provide flexible estimation of non-linear payoffs and non-Gaussian downside exposure, and serve as the primary classical comparator to quantum amplitude estimation techniques [57, \textit{Chapter 1 \& 7}], [6, \textit{Section 2}]. [7, \textit{Section 3}].
+
+\subsubsection{GARCH(1,1) Volatility Forecasting}
+
+For dynamic volatility forecasting, each asset series is modeled using the GARCH(1,1) process:
+\begin{equation}
+\sigma_t^2 = \omega + \alpha r_{t-1}^2 + \beta\sigma_{t-1}^2
+\end{equation}
+
+In the context of the above equation, the variables are defined as:
+\begin{itemize}
+\item $\sigma_t^2$: The Conditional Variance (volatility) at time $t$ given past information.
+\item $\omega$: A constant that determines the long-run average level of variance.
+\item $r_{t-1}^2$: The squared return from the previous period representing a market shock.
+\item $\sigma_{t-1}^2$: The previous period's conditional variance capturing volatility persistence.
+\item $\alpha$: The ARCH coefficient measuring sensitivity to recent shocks.
+\item$\beta$: The GARCH coefficient measuring the persistence of volatility over time.
+\end{itemize}
+
+ This above mentioned model captures volatility clustering, persistence, and conditional heteroskedasticity effects commonly observed in equity returns [52, \textit{Section 2}], [69, \textit{Section 3}], [70, \textit{Chapter 3}].
+
+\subsubsection{Extreme Value Theory -- Peaks Over Threshold}
+
+To model extreme tail losses beyond the VaR threshold, the Peaks Over Threshold (POT) method is implemented using the Generalized Pareto Distribution (GPD). For exceedances $y$ over threshold $u$, the fitted tail distribution is defined as:
+\begin{equation}
+F(y) = 1 - \left(1 + \frac{\xi y}{\beta}\right)^{-1/\xi}
+\end{equation}
+
+The variables in the equation are defined as:
+\begin{itemize}
+\item $F(y)$: The cumulative probability that the random variable is less than or equal to $y$.
+\item $y$: The standardized value of the random variable at which the CDF is evaluated.
+\item $\xi$: The shape parameter controlling the tail behavior of the distribution.
+\end{itemize}
+EVT-based approaches allow explicit modeling of rare events and provide a statistically grounded mechanism for estimating deep-tail risk [71, \textit{Section 3}], [72, \textit{Section 7.2}], [73, \textit{Chapter 6}].
+
+\subsection{Quantum Risk Algorithms}
+
+Quantum algorithms are integrated into the framework to evaluate potential quantum advantage in risk estimation.
+
+\subsubsection{Quantum Amplitude Estimation (QAE) for CVaR}
+
+Classical scenario probabilities $p_i$ are encoded into a quantum state representation as follows:
+\begin{equation}
+|\psi\rangle = \sum_i \sqrt{p_i}\, |i\rangle
+\end{equation}
+
+The variables in the above equation are defined as:
+\begin{itemize}
+\item $\lvert \psi \rangle$: The quantum state vector expressed as a superposition of basis states.
+\item $\sum_i$: The summation over all possible basis states indexed by $i$.
+\item $p_i$: The probability of obtaining outcome $i$ upon measurement.
+\item $\sqrt{p_i}$: The probability amplitude associated with basis state $\lvert i \rangle$.
+\item $\lvert i \rangle$: An orthogonal basis state of the Hilbert space.
+\end{itemize}
+Using this encoding, QAE enables estimation of tail probabilities and conditional expected losses with convergence scaling of $O(1/N)$, providing quadratic speedup compared to classical Monte Carlo methods that converge as $O(1/\sqrt{N})$ [59, \textit{Section 2}], [10, \textit{Section 3}].
+
+\subsubsection{Quantum GAN for Scenario Generation}
+
+A parametrized quantum circuit functions as the generator in a Quantum Generative Adversarial Network (QGAN). The PQC is trained jointly with a classical discriminator network to learn and reproduce the empirical market-return distribution. This hybrid training paradigm enables quantum-assisted generation of realistic risk scenarios [60].
+
+\subsubsection{Quantum PCA for Factor Risk}
+
+For scalable factor extraction, the covariance matrix $\Sigma$ is encoded as a quantum density matrix:
+\begin{equation}
+\rho = \frac{\Sigma}{\text{Tr}(\Sigma)}
+\end{equation}
+
+\begin{itemize}
+\item $\rho$: A density matrix representing a normalized quantum state.
+\item $\Sigma$: A positive semidefinite operator (unnormalized density matrix).
+\item $\operatorname{Tr}(\Sigma)$: The trace of $\Sigma$, equal to the sum of its eigenvalues and used to normalize the state.
+\end{itemize}
+
+Thus from the equation and the variables defined above, Quantum PCA approximates eigenvalues and eigenvectors of $\rho$, enabling efficient dimensionality reduction and identification of dominant risk factors in large portfolios [8, \textit{Section 2}].
+
+\subsection{Classical Portfolio Optimization}
+
+The framework benchmarks multiple classical optimization approaches.
+
+The standard Markowitz mean-variance optimization problem is formulated as:
+\begin{equation}
+\min_w\; w^\top \Sigma w \quad \text{s.t.}\; w^\top \mathbf{1} = 1,\; w \ge 0
+\end{equation}
+
+The variables in the above equation are defined as:
+\begin{itemize}
+\item $w$: The vector of portfolio weights allocated to each asset.
+\item $\Sigma$: The covariance matrix of asset returns.
+\item $w^\top \Sigma w$: The portfolio variance being minimized.
+\item $\mathbf{1}$: A vector of ones enforcing full investment.
+\item $w^\top \mathbf{1} = 1$: The budget constraint requiring weights to sum to one.
+\item $w \ge 0$: The no-short-selling constraint ensuring all weights are nonnegative.
+\end{itemize}
+[1, \textit{Section 3}], [74, \textit{Chapter 4}]
+
+The classical CVaR optimization problem used as a comparator is defined as:
+\begin{equation}
+\min_{w,\eta} \; \eta + \frac{1}{(1-\alpha)N} \sum_i \max(L_i(w) - \eta, 0)
+\end{equation}
+The variables are defined as:
+\begin{itemize}
+\item $w$: The decision vector (e.g., portfolio weights).
+\item $\eta$: An auxiliary threshold variable representing the Value-at-Risk level.
+\item $\alpha$: The confidence level for CVaR (e.g., $\alpha = 0.95$).
+\item $N$: The number of scenarios or samples.
+\item $L_i(w)$: The loss incurred under scenario $i$ for decision $w$.
+\item $\max(L_i(w)-\eta,0)$: The excess loss above the VaR threshold in scenario $i$.
+\item $\sum_i$: The aggregation of tail losses across all scenarios.
+\item $\eta + \frac{1}{(1-\alpha)N}\sum_i \max(\cdot)$: The empirical Conditional Value-at-Risk (CVaR) objective.
+\end{itemize}
+
+Alternative classical optimization techniques including Black-Litterman allocations and risk-parity constructions are implemented consistently with established literature [6, \textit{Section 4}].
+
+\subsection{Quantum Portfolio Optimization}
+
+Quantum algorithms are used for enhanced optimization.
+
+Binary-encoded quantum mean-variance optimization is defined as:
+\begin{equation}
+\min_x \; x^\top Q x
+\end{equation}
+\begin{itemize}
+\item $x$: The decision vector of optimization variables.
+\item $Q$: A symmetric positive semidefinite matrix defining the quadratic form.
+\item $x^\top Q x$: A quadratic objective function measuring cost, energy, or variance.
+\end{itemize}
+[61, \textit{Section 2}]
+
+The multi-objective quantum annealing formulation balancing risk and return is expressed as:
+\begin{equation}
+\min_x \; \lambda (x^\top \Sigma x) - (1-\lambda)(x^\top \mu)
+\end{equation}
+\begin{itemize}
+\item $x$: The decision vector (e.g., portfolio weights).
+\item $\Sigma$: The covariance matrix measuring risk or variability.
+\item $x^\top \Sigma x$: The quadratic risk (variance) of the decision vector.
+\item $\mu$: The vector of expected returns.
+\item $x^\top \mu$: The expected return of the decision vector.
+\item $\lambda$: The risk-return trade-off parameter balancing variance and mean.
+\end{itemize}
+
+Finally, QAOA-based CVaR optimization is implemented by converting the CVaR objective into QUBO form, encoding it into cost and mixer Hamiltonians, and optimizing variationally [40, \textit{Section 3}], [75, \textit{Chapter 6}].
+
+\subsection{Backtesting and Accuracy Metrics}
+
+Model performance is evaluated using rolling-window out-of-sample testing.
+
+The primary backtesting performance measure, hit rate, is computed as:
+\begin{equation}
+\text{Hit Rate} = \frac{\text{violations}}{\text{total days}}
+\end{equation}
+The above equation measures how often a risk limit is breached over time, typically used in Value-at-Risk (VaR) backtesting. It gives the proportion of days on which actual losses exceeded the predicted risk threshold.Thus in the ligevaluation tools include violation ratios, the Kupiec Unconditional Coverage Test [64, \textit{Section 2}], the Christoffersen Independence Test [65, \textit{Section 3}], analytical conditional coverage statistics, distributional drift diagnostics, and systematic classical versus quantum runtime and accuracy comparisons.
+
+
+\section{Results}
+\subsection{Experimental setup}
+\subsection{Dataset}
+\subsection{Performance Metrics}
+\subsection{Results}
+
+\section{Conclusion \& Future scope}
+
+\section{Bibliography}
+\begin{thebibliography}{99}
+\bibitem{}Markowitz, Harry. "Modern portfolio theory." Journal of Finance 7.11 (1952): 77-91.
+\bibitem{}Black, Fischer, and Robert Litterman. "Global portfolio optimization." Financial analysts journal 48.5 (1992): 28-43.
+\bibitem{}Michaud, Richard O. "The Markowitz optimization enigma: Is ‘optimized'optimal?." Financial analysts journal 45.1 (1989): 31-42
+\bibitem{}Ledoit, Olivier, and Michael Wolf. "Honey, I shrunk the sample covariance matrix." (2003).
+\bibitem{}Maillard, Sébastien, Thierry Roncalli, and Jérôme Teïletche. "The properties of equally weighted risk contribution portfolios." Journal of portfolio management 36.4 (2010): 60.
+\bibitem{}Rockafellar, R. Tyrrell, and Stanislav Uryasev. "Optimization of conditional value-at-risk." Journal of risk 2 (2000): 21-42.
+\bibitem{}Rockafellar, R. Tyrrell, and Stanislav Uryasev. "Conditional value-at-risk for general loss distributions." Journal of banking \& finance 26.7 (2002): 1443-1471.
+\bibitem{}Lloyd, Seth, Masoud Mohseni, and Patrick Rebentrost. "Quantum principal component analysis." Nature physics 10.9 (2014): 631-633.
+\bibitem{}He, Chen, et al. "A low-complexity quantum principal component analysis algorithm." IEEE transactions on quantum engineering 3 (2022): 1-13.
+\bibitem{}Woerner, Stefan, and Daniel J. Egger. "Quantum risk analysis." npj Quantum Information 5.1 (2019): 15.
+\bibitem{}Laudagé, Christian, and Ivica Turkalj. "Quantum Risk Analysis: Beyond (Conditional) Value-at-Risk." Quantum Economics and Finance (2025): 29767032251377083.
+\bibitem{}Stamatopoulos, Nikitas, et al. "Quantum Risk Analysis of Financial Derivatives." arXiv preprint arXiv:2404.10088 (2024)
+\bibitem{}Wilkens, S., Moorhouse, J. Quantum computing for financial risk measurement. Quantum Inf Process 22, 51 (2023). 
+\bibitem{}Investopedia, Gordon Scott, "Parametric Method in Value at Risk(VaR): Definition and Examples (2024)
+\bibitem{}Füss, R., Kaiser, D.G., Adams, Z. (2016). Value at Risk, GARCH Modelling and the Forecasting of Hedge Fund Return Volatility. In: Satchell, S. (eds) Derivatives and Hedge Funds. Palgrave Macmillan, London.
+\bibitem{}Laube, Falk, Jang Schiltz, and Virginie Terraza. "On the efficiency of risk measures for funds of hedge funds." Journal of Derivatives \& Hedge Funds 17.1 (2011): 63-84.
+\bibitem{}Venturelli, Davide, and Alexei Kondratyev. "Reverse quantum annealing approach to portfolio optimization problems." Quantum Machine Intelligence 1.1 (2019): 17-30.
+\bibitem{}Javadi-Abhari, Ali, et al. Quantum Computing with Qiskit. 2024. arXiv:2405.08810, doi:10.48550/arXiv.2405.08810.
+\bibitem{}Rizzato, Matteo, et al. "Generative Adversarial Networks applied to synthetic financial scenarios generation." Physica A: Statistical Mechanics and its Applications 623 (2023): 128899.
+\bibitem{}Wang, Zeheng, Timothy van der Laan, and Muhammad Usman. "Self‐Adaptive Quantum Kernel Principal Component Analysis for Compact Readout of Chemiresistive Sensor Arrays." Advanced Science 12.15 (2025): 2411573.
+\bibitem{}Jiang, Guangxin, Jianshu Hao, and Tong Sun. "Monte Carlo and importance sampling estimators of CoVaR." Operations Research Letters 60 (2025): 107250.
+\bibitem{}Dechant, David, et al. "Quantum generative modeling for financial time series with temporal correlations." arXiv preprint arXiv:2507.22035 (2025).
+\bibitem{}Orlandi, Filippo, Enrico Barbierato, and Alice Gatti. "Enhancing Financial Time Series Prediction with Quantum-Enhanced Synthetic Data Generation: A Case Study on the S\&P 500 Using a Quantum Wasserstein Generative Adversarial Network Approach with a Gradient Penalty." Electronics 13.11 (2024): 2158.
+\bibitem{}Wei, Jingyi, Steve Yang, and Zhenyu Cui. "Integrated GARCH-GRU in Financial Volatility Forecasting." arXiv preprint arXiv:2504.09380 (2025).
+\bibitem{}Huang, Yirong, and Yi Luo. "Forecasting conditional volatility based on hybrid GARCH-type models with long memory, regime switching, leverage effect and heavy-tail: Further evidence from equity market." The North American Journal of Economics and Finance 72 (2024): 102148.
+\bibitem{}Puschmann, Thomas, and Marine Huang-Sui.
+“A Taxonomy for Decentralized Finance.” International Review of Financial Analysis, vol. 92, 2024, p. 103083.
+\bibitem{}Candia, Claudio, and Rodrigo Herrera.
+“An Empirical Review of Dynamic Extreme Value Models for Forecasting Value at Risk, Expected Shortfall and Expectile.”
+Journal of Empirical Finance, vol. 77, 2024, p. 101488.
+doi:10.1016/j.jempfin.2024.101488.
+\bibitem{}Fiszeder, Piotr, Marta Małecka, and Peter Molnár. "Robust estimation of the range-based GARCH model: Forecasting volatility, value at risk and expected shortfall of cryptocurrencies." Economic Modelling 141 (2024): 106887.
+\bibitem{}Hambuckers, Julien, Marie Kratz, and Antoine Usseglio-Carleve. "Efficient estimation in extreme value regression models of hedge funds tail risks." Journal of Financial Econometrics 23.5 (2025): nbaf018.
+\bibitem{}Benito, Sonia, Carmen Lopez, and Mª Ángeles Navarro.
+“Assessing the Importance of the Choice Threshold in Quantifying Market Risk under the POT Approach (EVT).”
+Risk Management, vol. 25, 2023, p. 1.
+doi:10.1057/s41283-022-00106-w.
+\bibitem{}Li, Xia. "Unveiling portfolio resilience: Harnessing asymmetric copulas for dynamic risk assessment in the knowledge economy." Journal of the Knowledge Economy 15.3 (2024): 10200-10226.
+\bibitem{}Tomlinson, Matthew Frank. "Asymmetries and interactions between two tails of extreme returns in financial price time series." (2023).
+\bibitem{}Bee, Marco, Debbie J. Dupuis, and Luca Trapin. "Realized peaks over threshold: A time-varying extreme value approach with high-frequency-based measures." Journal of Financial Econometrics 17.2 (2019): 254-283.
+\bibitem{}Blazsek, Szabolcs, and Anna Downarowicz. "Forecasting hedge fund volatility: a Markov regime-switching approach." The European Journal of Finance 19.4 (2013): 243-275.
+\bibitem{}Prakash, Puneet, Vikas Sangwan, and Kewal Singh. "Transformational approach to analytical value-at-risk for near normal distributions." Journal of Risk and Financial Management 14.2 (2021): 51.
+\bibitem{}Flaig, Solveig, and Gero Junike. "Scenario generation for market risk models using generative neural networks." Risks 10.11 (2022): 199.
+\bibitem{}R. Cheng and T. Hou, "Pipe scale cleaning device based on YOLO algorithm and Carmen vortex street," 2023 IEEE 2nd International Conference on Electrical Engineering, Big Data and Algorithms (EEBDA), Changchun, China, 2023, pp. 470-474, doi: 10.1109/EEBDA56825.2023.10090514.
+\bibitem{}Liesting, Tomas, Flavius Frasincar, and Maria Mihaela Truşcă. "Data augmentation in a hybrid approach for aspect-based sentiment analysis." Proceedings of the 36th annual ACM symposium on applied computing. 2021.
+\bibitem{}Caldeira, Joao, et al. "Restricted boltzmann machines for galaxy morphology classification with a quantum annealer." arXiv preprint arXiv:1911.06259 (2019).
+\bibitem{}Rosenberg, Gili \& Haghnegahdar, Poya \& Goddard, Phil \& Carr, Peter \& Wu, Kesheng \& Lopez de Prado, Marcos. (2015). Solving the Optimal Trading Trajectory Problem Using a Quantum Annealer. 10.1145/2830556.2830563. 
+\bibitem{}Cesarone, Francesco, Manuel L. Martino, and Fabio Tardella. "Mean-Variance-VaR portfolios: MIQP formulation and performance analysis." OR Spectrum 45.3 (2023): 1043-1069.
+\bibitem{}Martin, Ana, et al.
+“Toward Pricing Financial Derivatives with an IBM Quantum Computer.”
+Physical Review Research, vol. 3, no. 1, 2021, p. 013167.
+doi:10.1103/PhysRevResearch.3.013167.
+\bibitem{}Skarlatos, Vasilis, and Nikos Konofaos. "Quantum Subgradient Estimation for Conditional Value-at-Risk Optimization." arXiv preprint arXiv:2510.04736 (2025).
+\bibitem{}Shen, Ruizhe, Zichang Hao, and Ching Hua Lee. "Benchmarking Quantum Solvers in Noisy Digital Simulations for Financial Portfolio Optimization." arXiv preprint arXiv:2508.21123 (2025).
+\bibitem{}Brandhofer, Sebastian, et al. "Benchmarking the performance of portfolio optimization with QAOA: S. Brandhofer et al." Quantum Information Processing 22.1 (2022): 25.
+\bibitem{}Cui, Jingjing, et al. "Quantum monte carlo integration for simulation-based optimisation." arXiv preprint arXiv:2410.03926 (2024).
+\bibitem{}Manzano, Alberto, et al. "Real Option Pricing using Quantum Computers." arXiv preprint arXiv:2303.06089 (2023).
+\bibitem{}Barkoutsos, Panagiotis Kl., et al.
+“Improving Variational Quantum Optimization Using CVaR.”
+Quantum, vol. 4, 2020, p. 256.
+doi:10.22331/q-2020-04-20-256.
+\bibitem{}Kolotouros, Ioannis, and Petros Wallden. "Evolving objective function for improved variational quantum optimization." Physical Review Research 4.2 (2022): 023225.
+\bibitem{}YU, Qingqing \& JIN, Rong. (2025). Improved Quantum Approximate Optimization Algorithm Based on Conditional Value-at-Risk for Portfolio Optimization. IEICE Transactions on Information and Systems. E108.D. 10.1587/transinf.2024EDP7254. 
+\bibitem{} MacKinlay, A. Craig, Andrew W. Lo, and John Y. Campbell. "The econometrics of financial markets." (2007).
+\bibitem{} Bollerslev, Tim. "Generalized autoregressive conditional heteroskedasticity." Journal of econometrics 31.3 (1986): 307-327.
+\bibitem{}Schuld, Maria, and Francesco Petruccione. "Supervised learning with quantum computers." Quantum science and technology 17 (2018).
+\bibitem{}Rubinstein, Reuven Y., and Dirk P. Kroese. Simulation and the Monte Carlo method. John Wiley & Sons, 2016.
+\bibitem{} Tu, Jun, and Guofu Zhou. "Markowitz meets Talmud: A combination of sophisticated and naive diversification strategies." Journal of financial economics 99.1 (2011): 204-215.
+\bibitem{} Morgan, J. P. "RiskMetrics-Technical Document." Morgan Guaranty Trust Company (1996).
+\bibitem{} Glasserman, Paul. Monte Carlo methods in financial engineering. Vol. 53. New York: springer, 2004.
+\bibitem{}Embrechts, Paul. "Quantitative risk management." International Encyclopedia of Statistical Science. Springer, Berlin, Heidelberg, 2011. 1151-1154.
+\bibitem{} Brassard, G., Høyer, P., Mosca, M., & Tapp, A. (2002). Quantum Amplitude Amplification and Estimation.
+In Quantum Computation and Information (AMS Contemporary Mathematics, Vol. 305).
+
+\bibitem{} Lloyd, Seth, and Christian Weedbrook. "Quantum generative adversarial learning." Physical review letters 121.4 (2018): 040502.
+
+\bibitem{} Lucas, Andrew. "Ising formulations of many NP problems." Frontiers in physics 2 (2014): 5.
+\bibitem{} Rosenberg, Gili, et al. "Solving the optimal trading trajectory problem using a quantum annealer." Proceedings of the 8th workshop on high performance computational finance. 2015
+\bibitem{} Farhi, Edward, Jeffrey Goldstone, and Sam Gutmann. "A quantum approximate optimization algorithm." arXiv preprint arXiv:1411.4028 (2014).
+\bibitem{} Kupiec, Paul H. Techniques for verifying the accuracy of risk measurement models. Vol. 95. No. 24. Washington, DC: Division of Research and Statistics, Division of Monetary Affairs, Federal Reserve Board, 1995.
+\bibitem{} Christoffersen, Peter F. "Evaluating interval forecasts." International economic review (1998): 841-862.
+\bibitem{} Quigley, Leo, and David Ramsey. "Statistical analysis of the log returns of financial assets." Financial mathematic, University of Limerick 32 (2008).
+\bibitem{} Le Courtois, Olivier, and Xia Xu. "Efficient portfolios and extreme risks: a Pareto–Dirichlet approach. Annals of Operations Research 335.1 (2024): 261-292".
+\bibitem{} Hull, John C. Risk management and financial institutions. John Wiley & Sons, 2023.7
+\bibitem{} Engle, Robert F. "Autoregressive conditional heteroscedasticity with estimates of the variance of United Kingdom inflation." Econometrica: Journal of the econometric society (1982): 987-1007.
+\bibitem{} Tsay, Ruey S. Analysis of financial time series. John wiley & sons, 2005.
+\bibitem{} Pickands III, James. "Statistical inference using extreme order statistics." the Annals of Statistics (1975): 119-131.
+\bibitem{} McNeil, Alexander J., Rüdiger Frey, and Paul Embrechts. Quantitative risk management: concepts, techniques and tools-revised edition. Princeton university press, 2015.
+\bibitem{} Embrechts, Paul, Claudia Klüppelberg, and Thomas Mikosch. Modelling extremal events: for insurance and finance. Vol. 33. Springer Science & Business Media, 2013.
+\bibitem{} Boyd, Stephen, and Lieven Vandenberghe. Convex optimization. Cambridge university press, 2004.
+\bibitem{} Egger, Daniel J., et al. "Quantum computing for finance: State-of-the-art and future prospects." IEEE Transactions on Quantum Engineering 1 (2020): 1-24.
+
+
+
+\end{thebibliography}
+\bibliographystyle{IEEEtran}
+\bibliography{references} % <-- references.bib file
+
+\end{document}
