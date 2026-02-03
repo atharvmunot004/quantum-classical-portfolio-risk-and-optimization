@@ -1,0 +1,234 @@
+{
+  "analysis_task": "varcov_asset_level_result_analysis",
+
+  "inputs": {
+    "metrics_table": "results/classical_risk/varcov_asset_level_metrics.parquet",
+    "time_sliced_metrics_table": "results/classical_risk/varcov_asset_level_time_sliced_metrics.parquet",
+    "risk_series_table": "results/classical_risk/varcov_asset_var_series.parquet",
+    "parameter_store": "cache/varcov_asset_parameters.parquet"
+  },
+
+  "analysis_scope": {
+    "level": "asset",
+    "dimensions": [
+      "confidence_level",
+      "horizon",
+      "estimation_window"
+    ],
+    "exclude_portfolio_fields": true
+  },
+
+  "data_validation": {
+    "required_columns": [
+      "confidence_level",
+      "horizon",
+      "estimation_window",
+      "hit_rate",
+      "violation_ratio"
+    ],
+    "drop_if_missing": [
+      "hit_rate",
+      "violation_ratio"
+    ],
+    "consistency_checks": [
+      {
+        "name": "hit_rate_bounds",
+        "rule": "0 <= hit_rate <= 1"
+      },
+      {
+        "name": "violation_ratio_finite",
+        "rule": "violation_ratio > 0"
+      }
+    ]
+  },
+
+  "primary_evaluation": {
+    "coverage_accuracy": {
+      "metrics": [
+        "hit_rate",
+        "violation_ratio"
+      ],
+      "expected_hit_rate": "1 - confidence_level",
+      "tolerance_band": {
+        "type": "relative",
+        "multiplier": 5
+      }
+    },
+
+    "statistical_backtests": {
+      "tests": [
+        "kupiec_unconditional_coverage",
+        "christoffersen_independence",
+        "christoffersen_conditional_coverage"
+      ],
+      "significance_level": 0.05,
+      "report_rejection_rates": true
+    },
+
+    "regulatory_diagnostics": {
+      "metric": "traffic_light_zone",
+      "aggregation": [
+        "count",
+        "percentage"
+      ]
+    }
+  },
+
+  "tail_risk_analysis": {
+    "var_tail_behavior": {
+      "metrics": [
+        "mean_exceedance",
+        "max_exceedance",
+        "std_exceedance",
+        "quantile_loss_score",
+        "rmse_var_vs_losses"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ]
+    }
+  },
+
+  "distributional_diagnostics": {
+    "assumed_distribution": "normal",
+    "metrics": [
+      "skewness",
+      "kurtosis",
+      "jarque_bera_p_value"
+    ],
+    "interpretation_rules": {
+      "normality_rejection_expected": true,
+      "note": "Frequent rejection of normality motivates EVT, GARCH, and Monte Carlo alternatives."
+    }
+  },
+
+  "rolling_parameter_diagnostics": {
+    "parameters": [
+      "rolling_mean",
+      "rolling_volatility"
+    ],
+    "stability_checks": {
+      "by_window": true,
+      "metrics": [
+        "mean",
+        "std",
+        "coefficient_of_variation"
+      ]
+    }
+  },
+
+  "time_sliced_analysis": {
+    "enabled": true,
+    "slice_by": [
+      "year",
+      "quarter"
+    ],
+    "metrics": [
+      "hit_rate",
+      "violation_ratio",
+      "num_violations",
+      "expected_violations",
+      "traffic_light_zone"
+    ],
+    "minimum_observations": 60,
+    "regime_comparison": {
+      "compare_slices": true,
+      "statistics": [
+        "mean_difference",
+        "ratio"
+      ]
+    }
+  },
+
+  "robustness_checks": {
+    "window_sensitivity": {
+      "compare_windows": [252, 500],
+      "metrics": [
+        "hit_rate",
+        "violation_ratio",
+        "rmse_var_vs_losses"
+      ]
+    },
+
+    "horizon_scaling_check": {
+      "compare_horizons": [1, 10],
+      "scaling_rule": "sqrt_time",
+      "metrics": [
+        "violation_ratio",
+        "rmse_var_vs_losses"
+      ]
+    }
+  },
+
+  "computational_performance": {
+    "metrics": [
+      "total_runtime_ms",
+      "mean_estimation_time_ms",
+      "volatility_estimation_time_ms",
+      "cache_hit_ratio"
+    ],
+    "aggregation": [
+      "mean",
+      "median",
+      "p95"
+    ],
+    "report_scalability": true
+  },
+
+  "ranking_and_selection": {
+    "ranking_metrics": [
+      {
+        "metric": "abs(hit_rate - (1 - confidence_level))",
+        "weight": 0.5
+      },
+      {
+        "metric": "violation_ratio",
+        "target": 1.0,
+        "weight": 0.3
+      },
+      {
+        "metric": "rmse_var_vs_losses",
+        "weight": 0.2
+      }
+    ],
+    "output_top_k": 10
+  },
+
+  "outputs": {
+    "summary_tables": {
+      "path": "result_analysis/classical_risk/varcov/varcov_asset_level_analysis_summary.parquet"
+    },
+
+    "time_sliced_tables": {
+      "path": "result_analysis/classical_risk/varcov/varcov_asset_level_time_sliced_analysis.parquet"
+    },
+
+    "figures": {
+      "path": "result_analysis/classical_risk/varcov/figures/",
+      "plots": [
+        "hit_rate_vs_confidence",
+        "violation_ratio_distribution",
+        "rolling_volatility_stability",
+        "time_sliced_hit_rate",
+        "var_time_series_vs_losses"
+      ]
+    },
+
+    "report": {
+      "path": "result_analysis/classical_risk/varcov/varcov_asset_level_analysis_report.md",
+      "sections": [
+        "coverage_accuracy_results",
+        "statistical_backtesting",
+        "tail_risk_behavior",
+        "normality_diagnostics",
+        "rolling_parameter_stability",
+        "regime_sensitivity",
+        "robustness_checks",
+        "computational_performance",
+        "discussion"
+      ]
+    }
+  }
+}

@@ -1,0 +1,242 @@
+{
+    "analysis_task": "evt_pot_asset_level_result_analysis",
+
+    "inputs": {
+      "metrics_table": "results/classical_risk/evt_asset_level_metrics.parquet",
+      "time_sliced_metrics_table": "results/classical_risk/evt_asset_level_time_sliced_metrics.parquet",
+      "risk_series_table": "results/classical_risk/evt_asset_var_cvar_series.parquet",
+      "parameter_store": "cache/evt_asset_parameters.parquet"
+    },
+
+    "analysis_scope": {
+      "level": "asset",
+      "dimensions": [
+        "confidence_level",
+        "horizon",
+        "estimation_window",
+        "threshold_quantile"
+      ],
+      "exclude_portfolio_fields": true
+    },
+
+    "data_validation": {
+      "required_columns": [
+        "confidence_level",
+        "horizon",
+        "estimation_window",
+        "threshold_quantile",
+        "hit_rate",
+        "violation_ratio",
+        "num_violations",
+        "expected_violations"
+      ],
+      "drop_if_missing": [
+        "hit_rate",
+        "violation_ratio"
+      ],
+      "consistency_checks": [
+        {
+          "name": "violation_ratio_finite",
+          "rule": "violation_ratio > 0"
+        },
+        {
+          "name": "hit_rate_bounds",
+          "rule": "0 <= hit_rate <= 1"
+        }
+      ]
+    },
+
+    "primary_evaluation": {
+      "coverage_accuracy": {
+        "metrics": [
+          "hit_rate",
+          "violation_ratio"
+        ],
+        "expected_hit_rate": "1 - confidence_level",
+        "tolerance_band": {
+          "type": "relative",
+          "multiplier": 5
+        }
+      },
+
+      "statistical_backtests": {
+        "tests": [
+          "kupiec_unconditional_coverage",
+          "christoffersen_independence",
+          "christoffersen_conditional_coverage"
+        ],
+        "significance_level": 0.05,
+        "report_rejection_rates": true
+      },
+
+      "regulatory_diagnostics": {
+        "metric": "traffic_light_zone",
+        "aggregation": [
+          "count",
+          "percentage"
+        ]
+      }
+    },
+
+    "tail_risk_analysis": {
+      "var_tail_behavior": {
+        "metrics": [
+          "mean_exceedance",
+          "max_exceedance",
+          "std_exceedance",
+          "quantile_loss_score",
+          "rmse_var_vs_losses"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ]
+      },
+
+      "cvar_tail_behavior": {
+        "metrics": [
+          "cvar_mean_exceedance",
+          "cvar_max_exceedance",
+          "cvar_std_exceedance",
+          "rmse_cvar_vs_losses"
+        ],
+        "aggregation": [
+          "mean",
+          "median",
+          "p95"
+        ]
+      }
+    },
+
+    "evt_parameter_diagnostics": {
+      "parameters": [
+        "tail_index_xi",
+        "scale_beta",
+        "threshold",
+        "num_exceedances"
+      ],
+      "stability_checks": {
+        "by_window": true,
+        "by_threshold": true,
+        "metrics": [
+          "mean",
+          "std",
+          "coefficient_of_variation"
+        ]
+      },
+      "constraints_validation": {
+        "xi_bounds": [-0.5, 0.5],
+        "flag_violations": true
+      }
+    },
+
+    "time_sliced_analysis": {
+      "enabled": true,
+      "slice_by": [
+        "year",
+        "quarter"
+      ],
+      "metrics": [
+        "hit_rate",
+        "violation_ratio",
+        "num_violations",
+        "expected_violations",
+        "traffic_light_zone"
+      ],
+      "minimum_observations": 60,
+      "regime_comparison": {
+        "compare_slices": true,
+        "statistics": [
+          "mean_difference",
+          "ratio"
+        ]
+      }
+    },
+
+    "robustness_checks": {
+      "threshold_sensitivity": {
+        "compare_quantiles": [0.95, 0.9, 0.85, 0.8],
+        "metrics": [
+          "hit_rate",
+          "violation_ratio",
+          "tail_index_xi"
+        ]
+      },
+
+      "window_sensitivity": {
+        "compare_windows": [252, 500],
+        "metrics": [
+          "hit_rate",
+          "violation_ratio",
+          "rmse_var_vs_losses"
+        ]
+      }
+    },
+
+    "computational_performance": {
+      "metrics": [
+        "total_runtime_ms",
+        "evt_fit_time_ms",
+        "threshold_selection_time_ms",
+        "cache_hit_ratio"
+      ],
+      "aggregation": [
+        "mean",
+        "median",
+        "p95"
+      ],
+      "report_scalability": true
+    },
+
+    "ranking_and_selection": {
+      "ranking_metrics": [
+        {
+          "metric": "abs(hit_rate - (1 - confidence_level))",
+          "weight": 0.4
+        },
+        {
+          "metric": "violation_ratio",
+          "target": 1.0,
+          "weight": 0.3
+        },
+        {
+          "metric": "rmse_var_vs_losses",
+          "weight": 0.3
+        }
+      ],
+      "output_top_k": 10
+    },
+
+    "outputs": {
+      "summary_tables": {
+        "path": "result_analysis/classical_risk/evt_pot/evt_asset_level_analysis_summary.parquet"
+      },
+      "time_sliced_tables": {
+        "path": "result_analysis/classical_risk/evt_pot/evt_asset_level_time_sliced_analysis.parquet"
+      },
+      "figures": {
+        "path": "result_analysis/classical_risk/evt_pot/figures/",
+        "plots": [
+          "hit_rate_vs_confidence",
+          "violation_ratio_distribution",
+          "tail_index_stability",
+          "time_sliced_hit_rate",
+          "threshold_sensitivity_heatmap"
+        ]
+      },
+      "report": {
+        "path": "result_analysis/classical_risk/evt_pot/evt_asset_level_analysis_report.md",
+        "sections": [
+          "coverage_accuracy_results",
+          "statistical_backtesting",
+          "tail_risk_characteristics",
+          "evt_parameter_stability",
+          "regime_sensitivity",
+          "robustness_checks",
+          "computational_performance",
+          "discussion"
+        ]
+      }
+    }
+  }
