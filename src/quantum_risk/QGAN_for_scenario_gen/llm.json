@@ -41,8 +41,8 @@
       "training_scope": "per_asset_per_window",
       "rolling": {
         "enabled": true,
-        "estimation_windows": [252, 500],
-        "step_size": 5,
+        "estimation_windows": [252],
+        "step_size": 50,
         "warmup_policy": "skip_until_window_full",
         "model_refresh_policy": "retrain_each_step"
       },
@@ -103,7 +103,7 @@
           "beta1": 0.9,
           "beta2": 0.999
         },
-        "max_iterations": 300,
+        "max_iterations": 50,
         "batch_size": 256,
         "early_stopping": {
           "enabled": true,
@@ -117,7 +117,8 @@
       "execution": {
         "backend": "aer_simulator",
         "shots": 4096,
-        "measurement_error_mitigation": false
+        "measurement_error_mitigation": false,
+        "use_gpu": true
       },
   
       "scenario_generation": {
