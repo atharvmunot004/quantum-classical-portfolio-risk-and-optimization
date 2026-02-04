@@ -1,0 +1,224 @@
+{
+    "task": "qae_cvar_portfolio_evaluation_ultra_fast_precompute",
+  
+    "intent": {
+      "problem": "Classical Monte Carlo CVaR evaluation per portfolio is the dominant bottleneck for large-scale portfolio evaluation (e.g., 100K portfolios).",
+      "goal": "Use Quantum Amplitude Estimation (QAE) as a reusable CVaR oracle by precomputing quantum CVaR artifacts per unique asset-set and confidence level, then reuse them across all portfolios sharing the same asset composition."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/processed/panel_price.parquet",
+      "precomputed_portfolios_path": "portfolios/portfolios.parquet",
+      "portfolio_weights_path": "portfolios/precomputed_weights.parquet",
+      "return_type": "log",
+      "loss_definition": "negative_return",
+      "confidence_levels": [0.95, 0.99],
+      "total_asset_universe_size": 10
+    },
+  
+    "execution_plan": {
+      "stage_A_precompute_quantum_risk_per_asset_set": true,
+      "stage_B_expand_weights_to_full_universe": true,
+      "stage_C_batch_portfolio_loss_evaluation": true,
+  
+      "key_idea": {
+        "group_by_asset_set": true,
+        "compute_quantum_cvar_once_per_asset_set": true,
+        "reuse_quantum_tail_expectation_across_portfolios": true,
+        "classical_outer_loop_only_for_weights": true
+      }
+    },
+  
+    "precompute_registry": {
+      "enabled": true,
+      "persist_to_disk": true,
+      "registry_root": "cache/qae_precompute",
+      "format": {
+        "tabular": "parquet",
+        "arrays": "npy",
+        "quantum_objects": "pickle"
+      },
+  
+      "artifacts": {
+        "daily_returns_full_universe": "cache/qae_precompute/daily_returns_full.parquet",
+  
+        "asset_set_index": "cache/qae_precompute/asset_sets.parquet",
+        "portfolio_to_asset_set_map": "cache/qae_precompute/portfolio_asset_set_map.parquet",
+  
+        "distribution_params_by_asset_set": "cache/qae_precompute/distribution_params.parquet",
+  
+        "quantum_state_preparation_by_asset_set": "cache/qae_precompute/state_prep_by_asset_set.pkl",
+  
+        "qae_tail_expectation_by_asset_set": "cache/qae_precompute/qae_tail_expectation.parquet",
+  
+        "var_thresholds_by_asset_set": "cache/qae_precompute/var_thresholds.parquet",
+  
+        "full_universe_weight_matrix": "cache/qae_precompute/W_full_10xN.npy"
+      },
+  
+      "reuse_rules": {
+        "distribution_fitting": {
+          "cache_key": ["asset_set", "estimation_window", "distribution_family"],
+          "compute_once": true
+        },
+        "quantum_state_preparation": {
+          "cache_key": ["asset_set", "num_qubits", "distribution_hash"],
+          "compute_once": true
+        },
+        "qae_tail_expectation": {
+          "cache_key": ["asset_set", "confidence_level", "epsilon_target"],
+          "compute_once": true
+        }
+      }
+    },
+  
+    "quantum_risk_settings": {
+      "risk_measure": "CVaR",
+      "formulation": "rockafellar_uryasev",
+  
+      "distribution_model": {
+        "type": "parametric",
+        "family": "multivariate_normal",
+        "estimation_window": 252,
+        "shrinkage": {
+          "enabled": true,
+          "method": "ledoit_wolf"
+        }
+      },
+  
+      "quantum_encoding": {
+        "num_state_qubits": 6,
+        "encoding": "amplitude_encoding",
+        "support_clipping_quantiles": [0.001, 0.999],
+        "rescale_to_unit_interval": true
+      },
+  
+      "qae": {
+        "algorithm": "iterative_amplitude_estimation",
+        "epsilon_target": 0.01,
+        "confidence_alpha": 0.05,
+        "backend": "aer_simulator",
+        "shots": 2000,
+        "max_grover_power": 8,
+        "random_seed": 42
+      }
+    },
+  
+    "portfolio_loss_construction": {
+      "loss_definition": "Lp = - R @ w",
+      "weights_source": "precomputed_weights",
+      "notes": "Portfolio weights are treated as fixed classical parameters. QAE estimates tail expectations conditional on the portfolio loss distribution induced by these weights."
+    },
+  
+    "batch_evaluation": {
+      "enabled": true,
+  
+      "portfolio_loss_matrix": {
+        "compute_in_batch": true,
+        "method": "matrix_multiply",
+        "shape": "T x N",
+        "use_full_universe_returns": true,
+        "use_full_universe_weight_matrix": true
+      },
+  
+      "metrics_batching": {
+        "compute_metrics_vectorized": true,
+        "use_quantum_cvar": true,
+        "classical_var_from_quantum_var_threshold": true,
+  
+        "time_sliced_metrics": {
+          "enabled": true,
+          "time_unit": "calendar_year",
+          "store_long_format": true
+        }
+      }
+    },
+  
+    "gpu_acceleration": {
+      "enabled": true,
+      "library": "cupy",
+      "fallback_to_cpu": true,
+  
+      "use_for": [
+        "batch_portfolio_loss_matrix_multiply",
+        "batch_percentiles_for_var",
+        "batch_aggregation_for_realized_cvar"
+      ],
+  
+      "do_not_use_gpu_for": [
+        "quantum_simulation",
+        "small_matrix_inverse"
+      ]
+    },
+  
+    "parallelization": {
+      "enabled": true,
+      "strategy": "parallelize_stage_A_over_asset_sets_then_stage_C_over_metric_blocks",
+      "n_jobs": "auto"
+    },
+  
+    "evaluation": {
+      "scope": "portfolio_level",
+  
+      "out_of_sample_performance": {
+        "enabled": true,
+        "metrics": [
+          "realized_return",
+          "realized_volatility",
+          "realized_cvar_quantum",
+          "max_drawdown"
+        ]
+      },
+  
+      "benchmark_comparison": {
+        "enabled": true,
+        "benchmarks": [
+          "classical_monte_carlo_cvar",
+          "historical_cvar",
+          "evt_based_cvar"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "risk": [
+        "quantum_cvar_95",
+        "quantum_cvar_99",
+        "classical_cvar_95",
+        "classical_cvar_99",
+        "cvar_error_vs_classical"
+      ],
+  
+      "quantum_specific": [
+        "qae_point_estimate",
+        "qae_confidence_interval_width",
+        "num_grover_iterations",
+        "circuit_depth",
+        "circuit_width",
+        "shots"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "mean_qae_runtime_ms",
+        "p95_qae_runtime_ms",
+        "cache_hit_ratio"
+      ]
+    },
+  
+    "outputs": {
+      "quantum_cvar_store": "results/quantum_portfolio/qae_portfolio_cvar.parquet",
+      "portfolio_loss_matrix": "results/quantum_portfolio/portfolio_loss_matrix.npy",
+      "metrics_table": "results/quantum_portfolio/qae_metrics.parquet",
+      "time_sliced_metrics": "results/quantum_portfolio/qae_time_sliced_metrics.parquet",
+      "metrics_schema_json": "results/quantum_portfolio/qae_metrics_schema.json",
+      "summary_report": "results/quantum_portfolio/qae_result_summary.md",
+      "runtime_profile": "results/quantum_portfolio/qae_runtime_profile.json"
+    },
+  
+    "paper_usage_notes": {
+      "simulation_phase": "Use this configuration to evaluate large batches of precomputed portfolios using QAE-based CVaR estimation with maximal reuse of quantum artifacts across identical asset sets.",
+      "paper_phase": "Report CVaR accuracy, confidence intervals, and runtime scaling relative to classical Monte Carlo CVaR. Emphasize that QAE acts as a risk oracle rather than a portfolio optimizer."
+    }
+  }
+  

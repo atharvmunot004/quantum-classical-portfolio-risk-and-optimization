@@ -1,0 +1,350 @@
+{
+    "task": "qaoa_cvar_portfolio_optimization_ultra_fast_precompute",
+  
+    "intent": {
+      "problem": "Classical CVaR portfolio optimization under cardinality and diversification constraints is computationally expensive when repeated across many rebalancing dates and weight-sweep configurations.",
+      "goal": "Formulate CVaR-based portfolio selection as a QUBO/Ising problem and solve it using QAOA. Use precomputation and reuse per unique asset-set/window to reduce repeated Hamiltonian construction overhead. Evaluate many candidate portfolios (from QAOA samples) in batch and store Pareto-efficient solutions."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/processed/panel_price.parquet",
+      "baseline_portfolios_path": "portfolios/portfolios.parquet",
+      "scenario_source": {
+        "type": "historical_or_generated",
+        "historical_returns_path": null,
+        "qgan_scenarios_path": null,
+        "notes": "Use historical rolling-window scenarios by default; optionally swap to QGAN-generated scenarios for stress scenario enrichment."
+      },
+      "return_type": "log",
+      "loss_definition": "negative_return",
+      "confidence_levels": [0.95, 0.99],
+      "risk_free_rate": 0.0001,
+      "total_asset_universe_size": 10
+    },
+  
+    "execution_plan": {
+      "stage_A_precompute_per_unique_asset_set_and_date": true,
+      "stage_B_qaoa_optimize_and_sample_candidates": true,
+      "stage_C_batch_evaluate_candidates_and_select": true,
+  
+      "key_idea": {
+        "group_by_asset_set": true,
+        "precompute_scenario_loss_coefficients": true,
+        "build_cost_hamiltonian_once_per_asset_set_per_date": true,
+        "reuse_parameterized_qaoa_circuit": true,
+        "batch_score_samples_for_cvar_and_constraints": true
+      }
+    },
+  
+    "precompute_registry": {
+      "enabled": true,
+      "persist_to_disk": true,
+      "registry_root": "cache/qaoa_cvar_precompute",
+      "format": {
+        "tabular": "parquet",
+        "arrays": "npy",
+        "quantum_objects": "pickle"
+      },
+  
+      "artifacts": {
+        "daily_returns_full_universe": "cache/qaoa_cvar_precompute/daily_returns_full.parquet",
+  
+        "asset_set_index": "cache/qaoa_cvar_precompute/asset_sets.parquet",
+        "portfolio_to_asset_set_map": "cache/qaoa_cvar_precompute/portfolio_asset_set_map.parquet",
+  
+        "scenario_matrix_by_date_asset_set": "cache/qaoa_cvar_precompute/scenarios_by_date_asset_set.npz",
+        "scenario_loss_coeffs_by_date_asset_set": "cache/qaoa_cvar_precompute/loss_coeffs_by_date_asset_set.npz",
+  
+        "cost_hamiltonian_by_date_asset_set": "cache/qaoa_cvar_precompute/cost_h_by_date_asset_set.pkl",
+        "mixer_hamiltonian": "cache/qaoa_cvar_precompute/mixer_h.pkl",
+  
+        "qaoa_best_params_by_date_asset_set": "cache/qaoa_cvar_precompute/qaoa_best_params.parquet",
+        "qaoa_samples_by_date_asset_set": "cache/qaoa_cvar_precompute/qaoa_samples.parquet"
+      },
+  
+      "reuse_rules": {
+        "scenario_generation": {
+          "cache_key": ["asset_set", "date", "estimation_window", "scenario_count", "scenario_source"],
+          "compute_once": true
+        },
+        "loss_coefficients": {
+          "cache_key": ["asset_set", "date", "confidence_level", "alpha_tail", "loss_definition"],
+          "compute_once": true
+        },
+        "hamiltonian_construction": {
+          "cache_key": ["asset_set", "date", "objective_weights", "constraints_hash"],
+          "compute_once": true
+        },
+        "qaoa_optimization": {
+          "cache_key": ["asset_set", "date", "reps", "optimizer", "shots"],
+          "compute_once": false
+        }
+      }
+    },
+  
+    "portfolio_problem": {
+      "decision_variables": {
+        "type": "binary_selection",
+        "variable": "x_i",
+        "meaning": "x_i = 1 if asset i is selected, else 0"
+      },
+  
+      "portfolio_weighting": {
+        "type": "equal_weight_on_selected",
+        "notes": "QAOA selects assets. Final portfolio weights are set to 1/K for selected assets (K = number selected). Optional extension: discretized weights with extra qubits."
+      },
+  
+      "constraints": {
+        "cardinality": {
+          "enabled": true,
+          "target_k": [5, 10],
+          "penalty_weight": 10.0
+        },
+        "long_only": true,
+        "fully_invested": true,
+        "max_weight_per_asset": 0.25,
+        "sector_or_group_constraints": {
+          "enabled": false,
+          "notes": "Optional: can be encoded with penalty terms if sector labels are available."
+        }
+      }
+    },
+  
+    "cvar_objective": {
+      "enabled": true,
+      "formulation": "scenario_based_cvar",
+      "alpha_tail": 0.95,
+      "definition": "CVaR_alpha = mean of worst (1-alpha) fraction of portfolio loss across scenarios",
+  
+      "scenario_loss_model": {
+        "loss_per_scenario": "L_s(x) = - sum_i (r_{s,i} * w_i(x))",
+        "weights_from_selection": "w_i(x) = x_i / sum_j x_j",
+        "linearization": {
+          "enabled": true,
+          "method": "auxiliary_variables",
+          "notes": "To express CVaR within QUBO, use standard linearization and penalties; if disabled, use a proxy quadratic tail-risk objective (variance / downside quadratic) for QUBO feasibility."
+        }
+      },
+  
+      "objective_weights": {
+        "risk_weight": [1.0, 2.0],
+        "return_weight": [0.25, 0.75],
+        "diversification_weight": [0.1, 0.5]
+      }
+    },
+  
+    "qubo_construction": {
+      "formulation": "ising_from_multiobjective_qubo",
+      "normalization": {
+        "enabled": true,
+        "method": "zscore_across_assets"
+      },
+  
+      "components": {
+        "risk_term": "cvar_proxy_or_linearized_cvar",
+        "return_term": "maximize_mean_return",
+        "diversification_term": "correlation_penalty",
+        "constraint_penalties": [
+          "cardinality_penalty",
+          "budget_penalty"
+        ]
+      },
+  
+      "penalty_weights": {
+        "budget_penalty": 10.0,
+        "cardinality_penalty": 10.0,
+        "linearization_penalty": 15.0
+      }
+    },
+  
+    "qaoa_settings": {
+      "ansatz": {
+        "type": "qaoa",
+        "reps_grid": [1, 2, 3],
+        "initial_point": "zeros"
+      },
+  
+      "optimizer": {
+        "type": "cobyla",
+        "maxiter": 250,
+        "tol": 1e-4,
+        "seed": 42
+      },
+  
+      "execution": {
+        "backend": "aer_simulator",
+        "shots": 5000,
+        "parameterized_circuit_reuse": true,
+        "measurement_error_mitigation": false
+      },
+  
+      "cvar_sampling": {
+        "enabled": true,
+        "definition": "Optimize using CVaR of measured bitstring energies (tail-average of energies).",
+        "alpha_grid": [0.95, 0.99],
+        "notes": "This is QAOA-CVaR as commonly implemented: objective uses worst-alpha tail of observed energies, not the financial CVaR directly unless the Hamiltonian encodes loss."
+      },
+  
+      "stopping_criteria": {
+        "patience": 25,
+        "min_improvement": 1e-4
+      }
+    },
+  
+    "multi_objective_analysis": {
+      "enabled": true,
+      "pareto_front": {
+        "tracking": true,
+        "metrics": ["expected_return", "cvar_estimate", "diversification_score", "constraint_violation_rate"]
+      },
+  
+      "weight_sweep": {
+        "enabled": true,
+        "num_weight_configs": 12
+      }
+    },
+  
+    "batch_evaluation": {
+      "enabled": true,
+  
+      "candidate_selection": {
+        "top_n_by_energy": 200,
+        "deduplicate_bitstrings": true,
+        "ensure_constraint_satisfaction": true
+      },
+  
+      "metrics_batching": {
+        "compute_metrics_vectorized": true,
+        "evaluate_oos": true,
+        "time_sliced_metrics": {
+          "enabled": true,
+          "time_unit": "calendar_year",
+          "store_long_format": true
+        }
+      }
+    },
+  
+    "gpu_acceleration": {
+      "enabled": true,
+      "library": "cupy",
+      "fallback_to_cpu": true,
+  
+      "use_for": [
+        "scenario_loss_matrix_compute",
+        "batch_candidate_scoring",
+        "batch_quantiles_for_cvar"
+      ],
+  
+      "do_not_use_gpu_for": [
+        "quantum_simulation",
+        "optimizer_inner_loop"
+      ]
+    },
+  
+    "parallelization": {
+      "enabled": true,
+      "strategy": "parallelize_over_dates_then_over_weight_configs",
+      "n_jobs": "auto"
+    },
+  
+    "evaluation": {
+      "scope": "portfolio_level",
+  
+      "out_of_sample_performance": {
+        "enabled": true,
+        "metrics": [
+          "realized_return",
+          "realized_volatility",
+          "realized_cvar",
+          "max_drawdown",
+          "turnover"
+        ]
+      },
+  
+      "benchmark_comparison": {
+        "enabled": true,
+        "benchmarks": [
+          "equal_weight",
+          "mean_variance_classical",
+          "cvar_optimization_classical"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "optimization_quality": [
+        "best_energy",
+        "energy_gap",
+        "constraint_violation_rate",
+        "pareto_front_size"
+      ],
+  
+      "portfolio_performance": [
+        "realized_return",
+        "realized_volatility",
+        "realized_cvar",
+        "max_drawdown",
+        "sharpe_ratio"
+      ],
+  
+      "quantum_specific": [
+        "reps",
+        "shots",
+        "num_qubits",
+        "circuit_depth",
+        "circuit_width",
+        "nfev",
+        "best_parameters"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "mean_qaoa_optimize_time_ms",
+        "p95_qaoa_optimize_time_ms",
+        "cache_hit_ratio"
+      ]
+    },
+  
+    "outputs": {
+      "qaoa_selected_portfolios": "results/quantum_portfolio/qaoa_selected_portfolios.parquet",
+      "qaoa_samples": "results/quantum_portfolio/qaoa_samples.parquet",
+      "portfolio_weights": "results/quantum_portfolio/qaoa_portfolio_weights.parquet",
+      "portfolio_performance": "results/quantum_portfolio/qaoa_portfolio_performance.parquet",
+      "pareto_front": "results/quantum_portfolio/qaoa_pareto_front.parquet",
+      "metrics_table": "results/quantum_portfolio/qaoa_metrics.parquet",
+      "time_sliced_metrics": "results/quantum_portfolio/qaoa_time_sliced_metrics.parquet",
+      "metrics_schema_json": "results/quantum_portfolio/qaoa_metrics_schema.json",
+      "summary_report": "results/quantum_portfolio/qaoa_result_summary.md",
+      "runtime_profile": "results/quantum_portfolio/qaoa_runtime_profile.json"
+    },
+  
+    "cursor_implementation_tasks": [
+      {
+        "file": "main.py",
+        "changes": [
+          "Stage A: Build unique asset sets by date; create portfolio->asset_set map for reuse of scenario matrices and Hamiltonians.",
+          "Generate rolling-window scenario matrices (historical or QGAN) per (date, asset_set) and persist to NPZ.",
+          "Build QUBO/Ising Hamiltonian encoding multi-objective terms + constraints; persist Hamiltonians to pickle.",
+          "Run QAOA across reps_grid and objective-weight sweep; store best parameters and sampled bitstrings.",
+          "Convert valid bitstrings to weights (equal-weight on selected assets) and evaluate out-of-sample performance.",
+          "Compute metrics and time-sliced metrics; write runtime profile."
+        ]
+      },
+      {
+        "file": "qaoa_portfolio.py",
+        "changes": [
+          "Implement cost construction: return term, diversification term, CVaR proxy or linearized scenario CVaR term, constraint penalties.",
+          "Expose QUBO->Ising converter and Hamiltonian caching by (date, asset_set, weights, constraints_hash).",
+          "Implement CVaR-of-energy objective for optimization (tail average of measured energies)."
+        ]
+      },
+      {
+        "file": "metrics.py",
+        "changes": [
+          "Add batch candidate scoring from scenario losses and compute realized CVaR from worst-tail scenarios.",
+          "Add portfolio-level metrics: turnover, drawdown, volatility, Sharpe and time-sliced aggregation."
+        ]
+      }
+    ]
+  }
+  

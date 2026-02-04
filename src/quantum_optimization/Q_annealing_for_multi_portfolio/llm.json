@@ -1,0 +1,285 @@
+{
+    "task": "quantum_annealing_multi_objective_portfolio_optimization_optimized",
+  
+    "design_principle": {
+      "quantum_scope": "portfolio_level_only",
+      "rolling_optimization": true,
+      "rationale": "Quantum Annealing is used to solve a multi-objective portfolio construction problem formulated as a QUBO. Objectives include expected return maximization, tail-risk minimization (CVaR-based), and diversification control under budget and cardinality constraints. Optimization is performed on rolling windows with out-of-sample evaluation to support IEEE Access-grade comparison with classical portfolio optimization methods."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/preprocessed/panel_price.parquet",
+      "asset_universe": {
+        "mode": "filtered",
+        "max_assets": 40,
+        "selection_method": "liquidity_and_data_availability",
+        "notes": "Asset universe is capped to fit current annealer connectivity constraints."
+      }
+    },
+  
+    "data_settings": {
+      "return_type": "log",
+      "loss_definition": "negative_return",
+      "calendar": {
+        "sort_index": true,
+        "drop_duplicate_dates": true,
+        "timezone": null
+      },
+      "missing_data_policy": {
+        "dropna": "panel_intersection",
+        "min_required_observations": 1000
+      }
+    },
+  
+    "optimization_windows": {
+      "estimation_windows": [252, 500],
+      "rebalance_frequency": 21,
+      "warmup_policy": "skip_until_window_full"
+    },
+  
+    "portfolio_objectives": {
+      "expected_return": {
+        "enabled": true,
+        "estimator": "rolling_mean_return",
+        "scaling": "annualized"
+      },
+  
+      "risk": {
+        "enabled": true,
+        "risk_measure": "CVaR",
+        "confidence_levels": [0.95],
+        "risk_source": "precomputed_quantum_or_classical",
+        "notes": "CVaR inputs may come from EVT, QAE, or QGAN scenario-based estimates."
+      },
+  
+      "diversification": {
+        "enabled": true,
+        "measure": "pairwise_correlation_penalty",
+        "source": "rolling_correlation_matrix"
+      }
+    },
+  
+    "constraints": {
+      "budget": {
+        "enabled": true,
+        "type": "binary_budget",
+        "target_fraction": 1.0
+      },
+  
+      "cardinality": {
+        "enabled": true,
+        "min_assets": 5,
+        "max_assets": 15
+      },
+  
+      "long_only": true,
+      "short_selling": false
+    },
+  
+    "qubo_construction": {
+      "formulation": "weighted_sum_multi_objective",
+      "objective_weights": {
+        "return_weight": [0.5, 1.0],
+        "risk_weight": [1.0, 2.0],
+        "diversification_weight": [0.1, 0.5]
+      },
+  
+      "penalty_weights": {
+        "budget_penalty": 10.0,
+        "cardinality_penalty": 8.0
+      },
+  
+      "normalization": {
+        "enabled": true,
+        "method": "zscore_across_assets"
+      }
+    },
+  
+    "quantum_annealing_settings": {
+      "solver_type": "quantum_annealer",
+      "backend": "dwave_or_simulated_annealer",
+  
+      "annealing_parameters": {
+        "num_reads": 5000,
+        "annealing_time_us": [20, 50],
+        "chain_strength": "auto",
+        "auto_scale": true
+      },
+  
+      "embedding": {
+        "method": "minor_embedding",
+        "optimize_embedding": true,
+        "embedding_retries": 5
+      },
+  
+      "sampling_postprocessing": {
+        "enabled": true,
+        "strategy": "lowest_energy_and_pareto_front"
+      },
+  
+      "random_seed": 42
+    },
+  
+    "multi_objective_analysis": {
+      "enabled": true,
+      "pareto_front": {
+        "tracking": true,
+        "metrics": ["expected_return", "CVaR", "diversification_score"]
+      },
+  
+      "weight_sweep": {
+        "enabled": true,
+        "num_weight_configs": 10
+      }
+    },
+  
+    "computation_strategy": {
+      "rolling_engine": {
+        "vectorization": "per_window",
+        "parallelization_axis": ["weight_config"],
+        "max_workers": "auto"
+      },
+  
+      "cache": {
+        "enabled": true,
+        "scope": "per_window_per_weight_config",
+        "store_format": "parquet",
+        "parameter_store_path": "cache/qa_portfolio_parameters.parquet",
+        "key_fields": [
+          "date",
+          "estimation_window",
+          "return_weight",
+          "risk_weight",
+          "diversification_weight",
+          "num_assets"
+        ],
+        "write_mode": "append_or_upsert"
+      },
+  
+      "runtime_instrumentation": {
+        "enabled": true,
+        "measure": [
+          "total_runtime_ms",
+          "qubo_build_time_ms",
+          "embedding_time_ms",
+          "annealing_time_ms",
+          "postprocessing_time_ms"
+        ]
+      }
+    },
+  
+    "evaluation": {
+      "scope": "portfolio_level",
+  
+      "out_of_sample_performance": {
+        "enabled": true,
+        "metrics": [
+          "realized_return",
+          "realized_volatility",
+          "realized_cvar",
+          "max_drawdown",
+          "turnover"
+        ]
+      },
+  
+      "benchmark_comparison": {
+        "enabled": true,
+        "benchmarks": [
+          "equal_weight",
+          "mean_variance",
+          "cvar_optimization_classical"
+        ]
+      },
+  
+      "time_sliced_metrics": {
+        "enabled": true,
+        "slice_by": ["year", "quarter"],
+        "metrics": [
+          "realized_return",
+          "realized_cvar",
+          "sharpe_ratio",
+          "turnover"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "optimization_quality": [
+        "best_energy",
+        "energy_gap",
+        "pareto_front_size"
+      ],
+  
+      "portfolio_performance": [
+        "realized_return",
+        "realized_volatility",
+        "realized_cvar",
+        "max_drawdown",
+        "sharpe_ratio"
+      ],
+  
+      "quantum_specific": [
+        "num_reads",
+        "annealing_time_us",
+        "chain_break_fraction",
+        "embedding_size",
+        "logical_to_physical_qubit_ratio"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "mean_annealing_time_ms",
+        "p95_annealing_time_ms"
+      ]
+    },
+  
+    "outputs": {
+      "portfolio_weights_store": {
+        "path": "results/quantum_portfolio/qa_portfolio_weights.parquet",
+        "format": "parquet",
+        "contents": [
+          "date",
+          "asset",
+          "weight",
+          "return_weight",
+          "risk_weight",
+          "diversification_weight"
+        ]
+      },
+  
+      "portfolio_performance_store": {
+        "path": "results/quantum_portfolio/qa_portfolio_performance.parquet",
+        "format": "parquet"
+      },
+  
+      "pareto_front_store": {
+        "path": "results/quantum_portfolio/qa_portfolio_pareto_front.parquet",
+        "format": "parquet"
+      },
+  
+      "metrics_table": {
+        "path": "results/quantum_portfolio/qa_portfolio_metrics.parquet",
+        "format": "parquet"
+      },
+  
+      "report": {
+        "path": "results/quantum_portfolio/qa_portfolio_report.md",
+        "include_sections": [
+          "problem_formulation",
+          "qubo_construction",
+          "quantum_annealing_and_embedding",
+          "multi_objective_tradeoffs",
+          "out_of_sample_performance",
+          "benchmark_comparison",
+          "limitations_and_scalability",
+          "key_insights"
+        ]
+      }
+    },
+  
+    "paper_usage_notes": {
+      "simulation_phase": "Use this configuration to study the feasibility of quantum annealing for constrained multi-objective portfolio construction under realistic asset universes and rolling rebalancing.",
+      "paper_phase": "For publication, emphasize Pareto trade-offs, stability across regimes, chain-break behavior, and comparison against classical CVaR optimization baselines."
+    }
+  }
+  

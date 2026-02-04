@@ -1,0 +1,297 @@
+{
+    "task": "qmv_qubo_portfolio_optimization_ultra_fast_precompute",
+  
+    "intent": {
+      "problem": "Classical mean-variance optimization becomes expensive when repeatedly solved across many rebalancing dates, constraint configurations, and large batches of candidate portfolios (e.g., 100K+).",
+      "goal": "Formulate mean-variance portfolio optimization as a QUBO/Ising problem (QMV) with discretized weights and solve using quantum-inspired or quantum backends (annealing or QAOA-compatible). Precompute reusable covariance/return artifacts per unique asset-set and batch-evaluate solutions for out-of-sample performance while preserving metric accuracy."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/processed/panel_price.parquet",
+      "baseline_portfolios_path": "portfolios/portfolios.parquet",
+      "return_type": "log",
+      "risk_free_rate": 0.0001,
+      "total_asset_universe_size": 10
+    },
+  
+    "execution_plan": {
+      "stage_A_precompute_per_unique_asset_set": true,
+      "stage_B_build_qubo_and_solve": true,
+      "stage_C_expand_weights_and_batch_evaluate": true,
+  
+      "key_idea": {
+        "group_by_asset_set": true,
+        "compute_mu_sigma_once_per_asset_set": true,
+        "construct_qubo_once_per_asset_set_per_objective": true,
+        "solve_many_times_for_lambda_sweep": true,
+        "batch_score_all_solutions_vectorized": true
+      }
+    },
+  
+    "precompute_registry": {
+      "enabled": true,
+      "persist_to_disk": true,
+      "registry_root": "cache/qmv_precompute",
+      "format": {
+        "tabular": "parquet",
+        "arrays": "npy",
+        "qubo": "npz"
+      },
+  
+      "artifacts": {
+        "daily_returns_full_universe": "cache/qmv_precompute/daily_returns_full.parquet",
+  
+        "asset_set_index": "cache/qmv_precompute/asset_sets.parquet",
+        "portfolio_to_asset_set_map": "cache/qmv_precompute/portfolio_asset_set_map.parquet",
+  
+        "mu_by_asset_set": "cache/qmv_precompute/mu_by_asset_set.parquet",
+        "cov_by_asset_set": "cache/qmv_precompute/cov_by_asset_set.parquet",
+  
+        "qubo_by_asset_set": "cache/qmv_precompute/qubo_by_asset_set.npz",
+  
+        "solutions_by_asset_set": "cache/qmv_precompute/solutions_by_asset_set.parquet",
+        "full_universe_weight_matrix": "cache/qmv_precompute/W_full_10xN.npy"
+      },
+  
+      "reuse_rules": {
+        "covariance_and_mean": {
+          "cache_key": ["asset_set", "estimation_window", "shrinkage_method"],
+          "compute_once": true
+        },
+        "qubo_construction": {
+          "cache_key": ["asset_set", "lambda_risk", "constraints_hash", "weight_encoding"],
+          "compute_once": true
+        },
+        "solver_runs": {
+          "cache_key": ["asset_set", "lambda_risk", "solver", "num_reads", "shots"],
+          "compute_once": false
+        }
+      }
+    },
+  
+    "mean_variance_settings": {
+      "estimation_window": 252,
+  
+      "expected_return": {
+        "method": "rolling_mean",
+        "annualize": true
+      },
+  
+      "covariance_estimation": {
+        "method": "sample",
+        "shrinkage": {
+          "enabled": true,
+          "method": "ledoit_wolf"
+        }
+      },
+  
+      "objective": {
+        "type": "mean_variance",
+        "form": "minimize_risk_minus_return",
+        "lambda_risk_grid": [0.1, 0.25, 0.5, 1.0, 2.0]
+      }
+    },
+  
+    "weight_encoding": {
+      "type": "binary_discretized_weights",
+      "bits_per_asset": 4,
+      "weight_step": 0.0625,
+      "max_weight_per_asset": 0.25,
+      "normalization": {
+        "fully_invested": true,
+        "method": "penalty",
+        "budget_penalty": 20.0
+      }
+    },
+  
+    "constraints": {
+      "long_only": true,
+      "fully_invested": true,
+      "weight_bounds": [0.0, 1.0],
+      "cardinality": {
+        "enabled": false,
+        "notes": "Optional: encode min/max holdings via additional penalties if needed."
+      }
+    },
+  
+    "qubo_construction": {
+      "formulation": "quadratic_mean_variance_qubo",
+      "normalization": {
+        "enabled": true,
+        "method": "zscore_across_assets"
+      },
+  
+      "penalty_weights": {
+        "budget_penalty": 20.0,
+        "max_weight_penalty": 10.0
+      },
+  
+      "notes": "QUBO is built by expanding variance term w^T Sigma w and return term -mu^T w into binary variables via discretized weight encoding. Budget and bound constraints are imposed using quadratic penalties."
+    },
+  
+    "solver_settings": {
+      "solver_type": "annealing_or_qaoa_compatible",
+      "backend": "dwave_or_simulated_annealer",
+  
+      "annealing_parameters": {
+        "num_reads": 5000,
+        "annealing_time_us": [20, 50],
+        "chain_strength": "auto",
+        "auto_scale": true
+      },
+  
+      "postprocessing": {
+        "enabled": true,
+        "strategy": "repair_then_select_lowest_energy",
+        "repair_budget_constraint": true,
+        "repair_weight_bounds": true
+      },
+  
+      "random_seed": 42
+    },
+  
+    "batch_evaluation": {
+      "enabled": true,
+  
+      "portfolio_returns_matrix": {
+        "compute_in_batch": true,
+        "method": "matrix_multiply",
+        "shape": "T x N",
+        "use_full_universe_returns": true,
+        "use_full_universe_weight_matrix": true
+      },
+  
+      "metrics_batching": {
+        "compute_metrics_vectorized": true,
+        "accurate_metrics_no_sampling": true,
+  
+        "time_sliced_metrics": {
+          "enabled": true,
+          "time_unit": "calendar_year",
+          "compute_from_batched_returns": true,
+          "store_long_format": true
+        }
+      }
+    },
+  
+    "gpu_acceleration": {
+      "enabled": true,
+      "library": "cupy",
+      "fallback_to_cpu": true,
+  
+      "use_for": [
+        "batch_portfolio_returns_matrix_multiply",
+        "batch_cumprod_running_max_for_drawdown",
+        "batch_percentiles_for_var_cvar",
+        "batch_mean_std_skew_kurtosis"
+      ],
+  
+      "do_not_use_gpu_for": [
+        "small_matrix_inverse_n<=40",
+        "qubo_solve_if_backend_is_remote"
+      ],
+  
+      "memory_management": {
+        "clear_cache_periodically": true,
+        "clear_every_n_portfolios": 20000
+      }
+    },
+  
+    "parallelization": {
+      "enabled": true,
+      "strategy": "parallelize_stage_A_over_asset_sets_then_stage_B_over_lambda_grid",
+      "n_jobs": "auto",
+  
+      "important_note": "Avoid sharing in-memory solver state across processes; rely on precompute_registry persisted artifacts."
+    },
+  
+    "evaluation": {
+      "scope": "portfolio_level",
+  
+      "out_of_sample_performance": {
+        "enabled": true,
+        "metrics": [
+          "realized_return",
+          "realized_volatility",
+          "sharpe_ratio",
+          "max_drawdown",
+          "turnover"
+        ]
+      },
+  
+      "benchmark_comparison": {
+        "enabled": true,
+        "benchmarks": [
+          "equal_weight",
+          "classical_mean_variance",
+          "risk_parity"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "optimization_quality": [
+        "best_energy",
+        "energy_gap",
+        "constraint_violation_rate"
+      ],
+  
+      "portfolio_performance": [
+        "realized_return",
+        "realized_volatility",
+        "sharpe_ratio",
+        "max_drawdown"
+      ],
+  
+      "quantum_specific": [
+        "num_reads",
+        "annealing_time_us",
+        "chain_break_fraction",
+        "embedding_size",
+        "logical_to_physical_qubit_ratio"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "mean_solve_time_ms",
+        "p95_solve_time_ms",
+        "cache_hit_ratio"
+      ]
+    },
+  
+    "outputs": {
+      "solutions": "results/quantum_portfolio/qmv_solutions.parquet",
+      "portfolio_weights": "results/quantum_portfolio/qmv_portfolio_weights.parquet",
+      "portfolio_daily_returns_matrix": "results/quantum_portfolio/qmv_portfolio_daily_returns.npy",
+      "metrics_table": "results/quantum_portfolio/qmv_metrics.parquet",
+      "time_sliced_metrics": "results/quantum_portfolio/qmv_time_sliced_metrics.parquet",
+      "metrics_schema_json": "results/quantum_portfolio/qmv_metrics_schema.json",
+      "summary_report": "results/quantum_portfolio/qmv_result_summary.md",
+      "runtime_profile": "results/quantum_portfolio/qmv_runtime_profile.json"
+    },
+  
+    "cursor_implementation_tasks": [
+      {
+        "file": "main.py",
+        "changes": [
+          "Stage A: build unique asset sets; compute rolling mu and covariance per asset_set; persist.",
+          "Stage B: construct QUBO per (asset_set, lambda_risk); solve via annealer; decode binary weights and repair constraints.",
+          "Stage C: expand subset weights to full-universe matrix W; compute portfolio returns in batch; compute metrics and time-sliced metrics; write runtime profile."
+        ]
+      },
+      {
+        "file": "qmv_qubo.py",
+        "changes": [
+          "Implement discretized weight encoding to binary variables; build Q matrix for mean-variance objective with penalties.",
+          "Implement decoder from bitstring to continuous weights and constraint repair routines."
+        ]
+      },
+      {
+        "file": "metrics.py",
+        "changes": [
+          "Add batch portfolio metrics (return, vol, Sharpe, drawdown, turnover) operating on (T x N) returns matrix."
+        ]
+      }
+    ]
+  }
+  

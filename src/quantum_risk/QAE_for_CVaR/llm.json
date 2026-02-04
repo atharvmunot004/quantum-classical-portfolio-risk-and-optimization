@@ -1,0 +1,307 @@
+{
+    "task": "qae_var_cvar_asset_level_evaluation_optimized",
+  
+    "design_principle": {
+      "quantum_scope": "asset_level_only",
+      "portfolio_projection": false,
+      "rationale": "Quantum Amplitude Estimation (QAE) is applied strictly to individual asset loss distributions. VaR and CVaR are estimated via rolling windows using quantum expectation estimation primitives. All diagnostics, backtesting, and runtime instrumentation are computed per asset and time-sliced to enable IEEE Access-grade empirical comparison with classical risk models, without portfolio-level aggregation assumptions."
+    },
+  
+    "inputs": {
+      "panel_price_path": "data/preprocessed/panel_price.parquet",
+      "asset_universe": {
+        "mode": "from_columns",
+        "include": null,
+        "exclude": null
+      }
+    },
+  
+    "data_settings": {
+      "return_type": "log",
+      "loss_definition": "negative_return",
+      "tail_side": "left",
+      "calendar": {
+        "sort_index": true,
+        "drop_duplicate_dates": true,
+        "timezone": null
+      },
+      "missing_data_policy": {
+        "dropna": "per_asset",
+        "min_required_observations": 800
+      }
+    },
+  
+    "quantum_risk_settings": {
+      "risk_measures": ["VaR", "CVaR"],
+      "confidence_levels": [0.95, 0.99],
+  
+      "var_estimation": {
+        "method": "qae_cdf_bisection",
+        "cdf_target_tolerance": 0.002,
+        "bisection_max_iterations": 25
+      },
+  
+      "cvar_estimation": {
+        "method": "rockafellar_uryasev_hinge",
+        "formula": "VaR + (1 / (1 - alpha)) * E[(L - VaR)^+]",
+        "tail_expectation_estimator": "qae"
+      },
+  
+      "estimation_windows": [252, 500],
+  
+      "rolling": {
+        "enabled": true,
+        "step_size": 21,
+        "warmup_policy": "skip_until_window_full",
+        "var_cvar_series_mode": "rolling_time_series"
+      },
+  
+      "random_seed": 42
+    },
+  
+    "distribution_model": {
+      "type": "parametric",
+      "family": "student_t",
+      "fit_method": "mle",
+      "support_clipping": {
+        "method": "quantile",
+        "lower_quantile": 0.001,
+        "upper_quantile": 0.999
+      }
+    },
+  
+    "quantum_encoding": {
+      "num_state_qubits": 6,
+      "discretization": "uniform_grid",
+      "encoding_space": "loss_space",
+      "rescale_to_unit_interval": true,
+      "state_preparation": {
+        "method": "analytic_distribution_loader",
+        "normalization_check": true
+      }
+    },
+  
+    "qae_settings": {
+      "algorithm": "iterative_amplitude_estimation",
+      "epsilon_target": 0.01,
+      "confidence_alpha": 0.05,
+      "shots": 2000,
+      "backend": "aer_simulator",
+      "max_grover_power": 8,
+      "measurement_error_mitigation": false
+    },
+  
+    "computation_strategy": {
+      "compute_returns_once": true,
+  
+      "rolling_engine": {
+        "vectorization": "per_asset_loop",
+        "parallelization_axis": ["asset"],
+        "max_workers": "auto",
+        "chunk_assets": 1
+      },
+  
+      "cache": {
+        "enabled": true,
+        "scope": "per_asset_per_window_per_confidence_per_time_index",
+        "store_format": "parquet",
+        "parameter_store_path": "cache/qae_asset_parameters.parquet",
+        "key_fields": [
+          "asset",
+          "date",
+          "estimation_window",
+          "confidence_level",
+          "num_state_qubits",
+          "distribution_family",
+          "epsilon_target",
+          "tail_side",
+          "return_type"
+        ],
+        "write_mode": "append_or_upsert",
+        "cache_hit_ratio_metric": true
+      },
+  
+      "runtime_instrumentation": {
+        "enabled": true,
+        "measure": [
+          "total_runtime_ms",
+          "returns_compute_time_ms",
+          "distribution_fit_time_ms",
+          "state_preparation_time_ms",
+          "qae_runtime_ms",
+          "var_search_time_ms",
+          "cvar_compute_time_ms",
+          "backtesting_time_ms",
+          "time_slicing_time_ms"
+        ]
+      },
+  
+      "safety_checks": {
+        "enabled": true,
+        "checks": [
+          {
+            "name": "var_monotonicity",
+            "rule": "VaR_99 >= VaR_95",
+            "on_fail": "flag_and_continue"
+          },
+          {
+            "name": "cvar_ge_var",
+            "rule": "CVaR >= VaR",
+            "on_fail": "flag_and_continue"
+          },
+          {
+            "name": "qae_confidence_interval_valid",
+            "rule": "ci_upper >= ci_lower",
+            "on_fail": "skip_timestamp"
+          }
+        ]
+      }
+    },
+  
+    "evaluation": {
+      "scope": "per_asset",
+      "outputs_granularity": {
+        "series_level": true,
+        "summary_level": true,
+        "time_sliced_level": true
+      },
+  
+      "backtesting": {
+        "enabled": true,
+        "tests": [
+          "hit_rate",
+          "violation_ratio",
+          "kupiec_unconditional_coverage",
+          "christoffersen_independence",
+          "christoffersen_conditional_coverage",
+          "traffic_light_zone"
+        ],
+        "notes": "Backtesting is applied to quantum-estimated VaR/CVaR series aligned with realized losses per asset."
+      },
+  
+      "time_sliced_metrics": {
+        "enabled": true,
+        "slice_by": ["year", "quarter", "month"],
+        "minimum_observations_per_slice": 60,
+        "metrics": [
+          "hit_rate",
+          "num_violations",
+          "expected_violations",
+          "violation_ratio",
+          "cvar_hit_rate",
+          "cvar_num_violations"
+        ]
+      }
+    },
+  
+    "metrics": {
+      "accuracy": [
+        "hit_rate",
+        "violation_ratio",
+        "num_violations",
+        "expected_violations",
+        "kupiec_unconditional_coverage",
+        "christoffersen_independence",
+        "christoffersen_conditional_coverage",
+        "traffic_light_zone"
+      ],
+  
+      "tail_behavior": [
+        "mean_exceedance",
+        "max_exceedance",
+        "rmse_var_vs_losses",
+        "rmse_cvar_vs_losses"
+      ],
+  
+      "quantum_specific": [
+        "qae_point_estimate",
+        "qae_confidence_interval_width",
+        "num_grover_iterations",
+        "circuit_depth",
+        "circuit_width",
+        "num_shots"
+      ],
+  
+      "distribution": [
+        "skewness",
+        "kurtosis",
+        "jarque_bera_statistic",
+        "jarque_bera_p_value"
+      ],
+  
+      "runtime": [
+        "total_runtime_ms",
+        "runtime_per_asset_ms",
+        "mean_qae_runtime_ms",
+        "p95_qae_runtime_ms",
+        "cache_hit_ratio"
+      ]
+    },
+  
+    "outputs": {
+      "parameter_store": {
+        "path": "cache/qae_asset_parameters.parquet",
+        "contents": [
+          "asset",
+          "date",
+          "estimation_window",
+          "confidence_level",
+          "distribution_family",
+          "distribution_parameters",
+          "num_state_qubits",
+          "epsilon_target",
+          "fit_success"
+        ]
+      },
+  
+      "risk_series_store": {
+        "path": "results/quantum_risk/qae_asset_var_cvar_series.parquet",
+        "format": "parquet",
+        "contents": [
+          "asset",
+          "date",
+          "confidence_level",
+          "estimation_window",
+          "VaR",
+          "CVaR",
+          "VaR_ci_lower",
+          "VaR_ci_upper",
+          "CVaR_ci_lower",
+          "CVaR_ci_upper"
+        ]
+      },
+  
+      "metrics_table": {
+        "path": "results/quantum_risk/qae_asset_level_metrics.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_confidence_x_window",
+        "notes": "Aggregated full-period performance and quantum diagnostics per asset."
+      },
+  
+      "time_sliced_metrics_table": {
+        "path": "results/quantum_risk/qae_asset_level_time_sliced_metrics.parquet",
+        "format": "parquet",
+        "row_granularity": "asset_x_slice_type_x_slice_value_x_confidence_x_window"
+      },
+  
+      "report": {
+        "path": "results/quantum_risk/qae_asset_level_report.md",
+        "include_sections": [
+          "quantum_methodology_overview",
+          "distribution_encoding_and_state_preparation",
+          "qae_var_and_cvar_construction",
+          "confidence_interval_behavior",
+          "backtesting_results",
+          "time_sliced_backtesting",
+          "quantum_vs_classical_runtime_comparison",
+          "key_insights"
+        ]
+      }
+    },
+  
+    "paper_usage_notes": {
+      "simulation_phase": "Use this configuration for large-scale asset-level quantum risk evaluation across multiple rolling windows and confidence levels. Results enable direct comparison with classical EVT, GARCH, and Monte Carlo baselines.",
+      "paper_phase": "For figures and tables, report selected assets and stress periods. Emphasize confidence interval behavior, circuit complexity, and sample-efficiency advantages relative to classical Monte Carlo CVaR estimation."
+    }
+  }
+  
