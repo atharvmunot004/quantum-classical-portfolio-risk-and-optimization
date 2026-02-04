@@ -1,0 +1,62 @@
+{
+  "tool": "QAOA",
+  "description": "QAOA-based CVaR asset-level tail risk estimation",
+  "parquet_schemas": {
+    "qaoa_asset_cvar_series.parquet": {
+      "description": "Time series of CVaR estimates and optimizer diagnostics per asset",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "reps", "dtype": "int64" },
+        { "name": "CVaR", "dtype": "float64" },
+        { "name": "best_energy", "dtype": "float64" },
+        { "name": "nfev", "dtype": "int64" }
+      ]
+    },
+    "qaoa_asset_level_metrics.parquet": {
+      "description": "Aggregated backtesting and distribution metrics per asset/window/confidence/reps",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "reps", "dtype": "int64" },
+        { "name": "hit_rate", "dtype": "float64" },
+        { "name": "violation_ratio", "dtype": "float64" },
+        { "name": "num_exceedances_vs_cvar", "dtype": "int64" },
+        { "name": "exceedance_rate_vs_cvar", "dtype": "float64" },
+        { "name": "total_observations", "dtype": "int64" },
+        { "name": "expected_violations", "dtype": "float64" },
+        { "name": "mean_exceedance_given_cvar", "dtype": "float64" },
+        { "name": "max_exceedance_given_cvar", "dtype": "float64" },
+        { "name": "tail_mean_loss", "dtype": "float64" },
+        { "name": "tail_max_loss", "dtype": "float64" },
+        { "name": "rmse_cvar_vs_losses", "dtype": "float64" },
+        { "name": "skewness", "dtype": "float64" },
+        { "name": "kurtosis", "dtype": "float64" },
+        { "name": "jarque_bera_statistic", "dtype": "float64" },
+        { "name": "jarque_bera_p_value", "dtype": "float64" },
+        { "name": "traffic_light_zone", "dtype": "object" }
+      ]
+    },
+    "qaoa_asset_level_time_sliced_metrics.parquet": {
+      "description": "Time-sliced exceedance and tail metrics per asset",
+      "columns": [
+        { "name": "slice", "dtype": "object" },
+        { "name": "start_date", "dtype": "object" },
+        { "name": "end_date", "dtype": "object" },
+        { "name": "num_exceedances_vs_cvar", "dtype": "int64" },
+        { "name": "exceedance_rate_vs_cvar", "dtype": "float64" },
+        { "name": "violation_ratio", "dtype": "float64" },
+        { "name": "mean_exceedance_given_cvar", "dtype": "float64" },
+        { "name": "max_exceedance_given_cvar", "dtype": "float64" },
+        { "name": "asset", "dtype": "object" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "reps", "dtype": "int64" },
+        { "name": "slice_type", "dtype": "object" }
+      ]
+    }
+  }
+}

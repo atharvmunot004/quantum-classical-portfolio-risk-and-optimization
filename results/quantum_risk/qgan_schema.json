@@ -1,0 +1,97 @@
+{
+  "tool": "QGAN",
+  "description": "Quantum GAN for scenario generation and VaR/CVaR from generated scenarios",
+  "parquet_schemas": {
+    "qgan_asset_scenarios.parquet": {
+      "description": "Generated return and loss scenarios per asset/date/horizon",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "scenario_id", "dtype": "int64" },
+        { "name": "horizon", "dtype": "int64" },
+        { "name": "generated_return", "dtype": "float64" },
+        { "name": "generated_loss", "dtype": "float64" }
+      ]
+    },
+    "qgan_asset_var_cvar_from_scenarios.parquet": {
+      "description": "VaR and CVaR derived from generated scenarios per asset/date",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "horizon", "dtype": "int64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "VaR_generated", "dtype": "float64" },
+        { "name": "CVaR_generated", "dtype": "float64" }
+      ]
+    },
+    "qgan_asset_level_metrics.parquet": {
+      "description": "Distribution quality, tail, and circuit metrics per asset/date/window",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "wasserstein_distance", "dtype": "float64" },
+        { "name": "ks_statistic", "dtype": "float64" },
+        { "name": "js_divergence", "dtype": "float64" },
+        { "name": "moment_error_mean", "dtype": "float64" },
+        { "name": "moment_error_var", "dtype": "float64" },
+        { "name": "moment_error_skew", "dtype": "float64" },
+        { "name": "moment_error_kurt", "dtype": "float64" },
+        { "name": "var_error_95", "dtype": "float64" },
+        { "name": "cvar_error_95", "dtype": "float64" },
+        { "name": "tail_mass_error_95", "dtype": "float64" },
+        { "name": "extreme_quantile_error_95", "dtype": "float64" },
+        { "name": "var_error_99", "dtype": "float64" },
+        { "name": "cvar_error_99", "dtype": "float64" },
+        { "name": "tail_mass_error_99", "dtype": "float64" },
+        { "name": "extreme_quantile_error_99", "dtype": "float64" },
+        { "name": "acf_squared_returns_lag1_5", "dtype": "float64" },
+        { "name": "leptokurtosis_gap", "dtype": "float64" },
+        { "name": "downside_skew_preservation", "dtype": "float64" },
+        { "name": "volatility_clustering_proxy", "dtype": "float64" },
+        { "name": "mode_collapse_score", "dtype": "float64" },
+        { "name": "generator_circuit_depth", "dtype": "float64" },
+        { "name": "generator_circuit_width", "dtype": "float64" },
+        { "name": "num_qubits", "dtype": "float64" },
+        { "name": "shots", "dtype": "float64" },
+        { "name": "generator_loss_final", "dtype": "float64" },
+        { "name": "generator_loss_mean", "dtype": "float64" },
+        { "name": "generator_loss_std", "dtype": "float64" },
+        { "name": "generator_loss_min", "dtype": "float64" },
+        { "name": "generator_loss_max", "dtype": "float64" },
+        { "name": "generator_loss_trace", "dtype": "object" },
+        { "name": "discriminator_loss_final", "dtype": "float64" },
+        { "name": "discriminator_loss_mean", "dtype": "float64" },
+        { "name": "discriminator_loss_std", "dtype": "float64" },
+        { "name": "discriminator_loss_min", "dtype": "float64" },
+        { "name": "discriminator_loss_max", "dtype": "float64" },
+        { "name": "discriminator_loss_trace", "dtype": "object" }
+      ]
+    },
+    "qgan_asset_level_time_sliced_metrics.parquet": {
+      "description": "Time-sliced distribution and tail metrics per asset (optional output)",
+      "columns": [
+        { "name": "slice", "dtype": "object" },
+        { "name": "start_date", "dtype": "object" },
+        { "name": "end_date", "dtype": "object" },
+        { "name": "wasserstein_distance", "dtype": "float64" },
+        { "name": "ks_statistic", "dtype": "float64" },
+        { "name": "moment_error_mean", "dtype": "float64" },
+        { "name": "moment_error_var", "dtype": "float64" },
+        { "name": "moment_error_skew", "dtype": "float64" },
+        { "name": "moment_error_kurt", "dtype": "float64" },
+        { "name": "var_error_95", "dtype": "float64" },
+        { "name": "cvar_error_95", "dtype": "float64" },
+        { "name": "tail_mass_error_95", "dtype": "float64" },
+        { "name": "var_error_99", "dtype": "float64" },
+        { "name": "cvar_error_99", "dtype": "float64" },
+        { "name": "tail_mass_error_99", "dtype": "float64" },
+        { "name": "asset", "dtype": "object" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "horizon", "dtype": "int64" },
+        { "name": "slice_type", "dtype": "object" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "tool": "QAE",
+  "description": "Quantum Amplitude Estimation for VaR/CVaR asset-level risk estimation",
+  "parquet_schemas": {
+    "qae_asset_var_cvar_series.parquet": {
+      "description": "Time series of VaR and CVaR estimates per asset with confidence intervals",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "VaR", "dtype": "float64" },
+        { "name": "CVaR", "dtype": "float64" },
+        { "name": "VaR_ci_lower", "dtype": "float64" },
+        { "name": "VaR_ci_upper", "dtype": "float64" },
+        { "name": "CVaR_ci_lower", "dtype": "float64" },
+        { "name": "CVaR_ci_upper", "dtype": "float64" }
+      ]
+    },
+    "qae_asset_level_metrics.parquet": {
+      "description": "Aggregated backtesting and distribution metrics per asset/window/confidence",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "hit_rate", "dtype": "float64" },
+        { "name": "violation_ratio", "dtype": "float64" },
+        { "name": "kupiec_unconditional_coverage", "dtype": "float64" },
+        { "name": "kupiec_test_statistic", "dtype": "float64" },
+        { "name": "kupiec_reject_null", "dtype": "bool" },
+        { "name": "christoffersen_independence", "dtype": "float64" },
+        { "name": "christoffersen_independence_statistic", "dtype": "float64" },
+        { "name": "christoffersen_independence_reject_null", "dtype": "bool" },
+        { "name": "christoffersen_conditional_coverage", "dtype": "float64" },
+        { "name": "christoffersen_conditional_coverage_statistic", "dtype": "float64" },
+        { "name": "christoffersen_conditional_coverage_reject_null", "dtype": "bool" },
+        { "name": "num_violations", "dtype": "int64" },
+        { "name": "total_observations", "dtype": "int64" },
+        { "name": "expected_violations", "dtype": "float64" },
+        { "name": "traffic_light_zone", "dtype": "object" },
+        { "name": "mean_exceedance", "dtype": "float64" },
+        { "name": "max_exceedance", "dtype": "float64" },
+        { "name": "std_exceedance", "dtype": "float64" },
+        { "name": "quantile_loss_score", "dtype": "float64" },
+        { "name": "rmse_var_vs_losses", "dtype": "float64" },
+        { "name": "cvar_mean_exceedance", "dtype": "float64" },
+        { "name": "cvar_max_exceedance", "dtype": "float64" },
+        { "name": "cvar_std_exceedance", "dtype": "float64" },
+        { "name": "rmse_cvar_vs_losses", "dtype": "float64" },
+        { "name": "skewness", "dtype": "float64" },
+        { "name": "kurtosis", "dtype": "float64" },
+        { "name": "jarque_bera_p_value", "dtype": "float64" },
+        { "name": "jarque_bera_statistic", "dtype": "float64" }
+      ]
+    },
+    "qae_asset_level_time_sliced_metrics.parquet": {
+      "description": "Time-sliced (year/quarter/month) backtesting metrics per asset",
+      "columns": [
+        { "name": "slice", "dtype": "object" },
+        { "name": "start_date", "dtype": "object" },
+        { "name": "end_date", "dtype": "object" },
+        { "name": "hit_rate", "dtype": "float64" },
+        { "name": "num_violations", "dtype": "int64" },
+        { "name": "expected_violations", "dtype": "float64" },
+        { "name": "violation_ratio", "dtype": "float64" },
+        { "name": "cvar_hit_rate", "dtype": "float64" },
+        { "name": "cvar_num_violations", "dtype": "int64" },
+        { "name": "asset", "dtype": "object" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "slice_type", "dtype": "object" }
+      ]
+    }
+  }
+}

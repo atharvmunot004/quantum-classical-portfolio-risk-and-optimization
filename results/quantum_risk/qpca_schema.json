@@ -1,0 +1,79 @@
+{
+  "tool": "qPCA",
+  "description": "Quantum PCA for factor risk: rolling-window factors, asset exposures, and factor-implied VaR/CVaR",
+  "parquet_schemas": {
+    "qpca_factor_series.parquet": {
+      "description": "Per-window factor eigenvalues and explained variance",
+      "columns": [
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "top_k", "dtype": "int64" },
+        { "name": "factor_id", "dtype": "int64" },
+        { "name": "eigenvalue", "dtype": "float64" },
+        { "name": "explained_variance_ratio", "dtype": "float64" },
+        { "name": "cumulative_explained_variance", "dtype": "float64" }
+      ]
+    },
+    "qpca_asset_factor_exposures.parquet": {
+      "description": "Per-asset factor loadings (exposures) by date/window/top_k",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "top_k", "dtype": "int64" },
+        { "name": "factor_id", "dtype": "int64" },
+        { "name": "exposure", "dtype": "float64" }
+      ]
+    },
+    "qpca_asset_factor_risk_proxies.parquet": {
+      "description": "Factor-implied VaR/CVaR and idiosyncratic variance per asset/date/confidence",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "date", "dtype": "datetime64[ns]" },
+        { "name": "confidence_level", "dtype": "float64" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "top_k", "dtype": "int64" },
+        { "name": "VaR_factor", "dtype": "float64" },
+        { "name": "CVaR_factor", "dtype": "float64" },
+        { "name": "idiosyncratic_variance", "dtype": "float64" }
+      ]
+    },
+    "qpca_asset_level_metrics.parquet": {
+      "description": "Aggregated factor quality, classical alignment, and risk proxy metrics per asset/window/top_k",
+      "columns": [
+        { "name": "asset", "dtype": "object" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "top_k", "dtype": "int64" },
+        { "name": "explained_variance_ratio_k", "dtype": "float64" },
+        { "name": "cumulative_explained_variance_k", "dtype": "float64" },
+        { "name": "factor_stability_cosine_similarity", "dtype": "float64" },
+        { "name": "principal_angle_distance_vs_classical", "dtype": "float64" },
+        { "name": "explained_variance_gap", "dtype": "float64" },
+        { "name": "exposure_correlation", "dtype": "float64" },
+        { "name": "factor_var_95", "dtype": "float64" },
+        { "name": "factor_var_99", "dtype": "float64" },
+        { "name": "factor_cvar_95", "dtype": "float64" },
+        { "name": "factor_cvar_99", "dtype": "float64" },
+        { "name": "idiosyncratic_variance", "dtype": "float64" },
+        { "name": "precision_bits", "dtype": "int64" },
+        { "name": "shots", "dtype": "int64" },
+        { "name": "qpca_circuit_depth", "dtype": "int64" },
+        { "name": "qpca_circuit_width", "dtype": "int64" },
+        { "name": "date", "dtype": "datetime64[ns]" }
+      ]
+    },
+    "qpca_asset_level_time_sliced_metrics.parquet": {
+      "description": "Time-sliced factor and alignment metrics by slice_type/slice_value/window/top_k",
+      "columns": [
+        { "name": "slice_type", "dtype": "object" },
+        { "name": "slice_value", "dtype": "object" },
+        { "name": "estimation_window", "dtype": "int64" },
+        { "name": "top_k", "dtype": "int64" },
+        { "name": "n_observations", "dtype": "int64" },
+        { "name": "cumulative_explained_variance_mean", "dtype": "float64" },
+        { "name": "principal_angle_distance_mean", "dtype": "float64" },
+        { "name": "exposure_correlation_mean", "dtype": "float64" }
+      ]
+    }
+  }
+}
