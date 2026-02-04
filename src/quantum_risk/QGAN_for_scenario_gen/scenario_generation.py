@@ -37,40 +37,37 @@ def generate_scenarios(
     
     all_scenarios = {}
     
-    for horizon in scaled_horizons:
-        if horizon == base_horizon:
+    # Always include base (1-step) horizon for risk metrics
+    horizons_to_compute = set(scaled_horizons) | {base_horizon}
+    
+    for horizon in sorted(horizons_to_compute):
+        if horizon == base_horizon or horizon == 1:
             # Generate 1-step scenarios
             bitstrings = generator.generate_samples(generator_params, num_samples=num_scenarios)
             returns_1step = map_bitstrings_to_returns(
                 bitstrings, grid, generator.num_qubits
             )
-            
-            if aggregation_rule == 'sum_log_returns':
-                # For multi-step, sum log returns
-                if horizon > 1:
-                    # Generate multiple 1-step scenarios and aggregate
-                    returns_multi = []
-                    for _ in range(horizon):
-                        bitstrings_h = generator.generate_samples(
-                            generator_params, num_samples=num_scenarios
-                        )
-                        returns_h = map_bitstrings_to_returns(
-                            bitstrings_h, grid, generator.num_qubits
-                        )
-                        returns_multi.append(returns_h)
-                    returns = np.sum(returns_multi, axis=0)
-                else:
-                    returns = returns_1step
-            else:
-                returns = returns_1step
-            
-            losses = -returns  # Loss = -return
-            
-            all_scenarios[horizon] = {
-                'returns': returns,
-                'losses': losses,
-                'scenario_ids': np.arange(len(returns))
-            }
+            returns = returns_1step
+        else:
+            # Multi-step: aggregate 1-step log returns
+            returns_multi = []
+            for _ in range(horizon):
+                bitstrings_h = generator.generate_samples(
+                    generator_params, num_samples=num_scenarios
+                )
+                returns_h = map_bitstrings_to_returns(
+                    bitstrings_h, grid, generator.num_qubits
+                )
+                returns_multi.append(returns_h)
+            returns = np.sum(returns_multi, axis=0)
+        
+        losses = -returns  # Loss = -return
+        
+        all_scenarios[horizon] = {
+            'returns': returns,
+            'losses': losses,
+            'scenario_ids': np.arange(len(returns))
+        }
     
     return all_scenarios
 
