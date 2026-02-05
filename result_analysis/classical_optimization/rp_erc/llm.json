@@ -1,297 +1,220 @@
 {
-    "analysis_task": "risk_parity_erc_classical_optimization_analysis",
-  
-    "analysis_principle": {
-      "optimization_scope": "portfolio_level",
-      "risk_model": "equal_risk_contribution",
-      "result_format": "markdown_tables_only",
-      "rationale": "Risk Parity (ERC) portfolios are evaluated through risk contribution balance, downside risk control, and diversification metrics. Results are communicated via markdown tables suitable for direct inclusion in IEEE Access manuscripts."
-    },
-  
-    "inputs": {
-      "metrics_table": "results/classical_optimization/rp_erc_metrics.parquet",
-      "metrics_schema": "results/classical_optimization/rp_erc_metrics_schema.json",
-      "summary_report": "results/classical_optimization/rp_erc_report.md"
-    },
-  
-    "analysis_scope": {
-      "level": "portfolio",
-      "dimensions": [
-        "portfolio_id",
-        "covariance_estimator",
-        "estimation_window",
-        "rebalancing_frequency"
-      ],
-      "grouping": {
-        "primary": "covariance_estimator",
-        "secondary": "estimation_window"
+  "task": "ieee_access_result_analysis_markdown_and_figures",
+  "version": "1.0.0",
+
+  "intent": {
+    "problem": "Need publication-grade (IEEE Access) result analysis for Risk Parity / Equal Risk Contribution portfolio optimization.",
+    "goal": "Generate markdown documents and figures emphasizing risk contribution equality, diversification quality, and robustness versus baselines."
+  },
+
+  "inputs": {
+    "tool_name": "risk_parity_erc",
+
+    "run_artifacts": {
+      "llm_spec_reference": "src/classical_optimization/risk_parity_ERC/llm.json",
+      "metrics_schema_json": "results/classical_optimization/rp_erc_metrics_schema.json",
+      "summary_report_md": "results/classical_optimization/rp_erc_report.md",
+
+      "expected_outputs_from_pipeline": {
+        "optimal_portfolios": "results/classical_optimization/rp_erc_weights.parquet",
+        "risk_contribution_table": "results/classical_optimization/rp_erc_risk_contributions.parquet",
+        "metrics_table": "results/classical_optimization/rp_erc_metrics.parquet"
       }
     },
-  
-    "data_validation": {
-      "required_metrics": [
-        "risk_parity_deviation_score",
-        "equal_risk_gap",
-        "volatility",
-        "max_drawdown"
-      ],
-      "consistency_checks": [
-        {
-          "name": "non_negative_risk_contributions",
-          "rule": "min_risk_contribution >= 0"
-        },
-        {
-          "name": "finite_deviation_score",
-          "rule": "isfinite(risk_parity_deviation_score)"
-        }
-      ]
-    },
-  
-    "primary_risk_parity_analysis": {
-      "risk_contribution_balance": {
-        "metrics": [
-          "risk_contribution_variance",
-          "risk_contribution_std",
-          "risk_contribution_coefficient_of_variation",
-          "equal_risk_gap",
+
+    "analysis_settings": {
+      "selection_rules": {
+        "top_k": 10,
+        "rank_by": [
           "risk_parity_deviation_score",
-          "risk_concentration_index"
+          "risk_concentration_index",
+          "volatility_reduction_vs_baseline",
+          "sharpe_improvement_vs_baseline"
         ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ],
-        "interpretation_note": "Lower deviation and variance indicate better adherence to equal risk contribution."
+        "tail_examples": 10
       },
-  
-      "portfolio_quality_metrics": {
-        "metrics": [
-          "expected_return",
-          "volatility",
-          "sharpe_ratio",
-          "sortino_ratio",
-          "max_drawdown",
-          "calmar_ratio"
-        ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
-      }
-    },
-  
-    "baseline_comparison_analysis": {
-      "enabled": true,
-      "baselines": [
-        "baseline_portfolios_from_file",
-        "equal_weight_same_assets",
-        "min_variance_same_assets"
-      ],
-      "comparison_metrics": [
-        "volatility_reduction_vs_baseline",
-        "sharpe_improvement_vs_baseline",
-        "risk_contribution_improvement_vs_baseline",
-        "erc_vs_equal_weight_volatility",
-        "erc_vs_equal_weight_sharpe",
-        "erc_vs_equal_weight_risk_contributions"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ]
-    },
-  
-    "downside_and_tail_risk_analysis": {
-      "metrics": [
-        "value_at_risk",
-        "conditional_value_at_risk",
-        "downside_deviation",
-        "semivariance",
-        "max_drawdown"
-      ],
-      "interpretation_note": "ERC portfolios often reduce volatility but may still exhibit tail losses under extreme correlations."
-    },
-  
-    "portfolio_structure_analysis": {
-      "metrics": [
-        "num_assets_in_portfolio",
-        "hhi_concentration",
-        "effective_number_of_assets",
-        "weight_entropy",
-        "pairwise_correlation_mean"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ],
-      "interpretation_note": "ERC encourages diversification by equalizing risk, not weights."
-    },
-  
-    "distributional_diagnostics": {
-      "metrics": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "interpretation_note": "Normality is not assumed in ERC, but diagnostics contextualize tail behavior."
-    },
-  
-    "robustness_and_sensitivity": {
-      "covariance_estimator_sensitivity": {
-        "compare_estimators": [
-          "sample",
-          "oas",
-          "ewma"
-        ],
-        "metrics": [
-          "risk_parity_deviation_score",
-          "volatility",
-          "max_drawdown"
-        ]
-      },
-  
-      "window_sensitivity": {
-        "compare_windows": [252, 500, 750],
-        "metrics": [
-          "risk_parity_deviation_score",
-          "volatility"
-        ]
-      }
-    },
-  
-    "statistical_significance_analysis": {
-      "enabled": true,
-      "tests": [
-        "jobson_korkie_sharpe_difference",
-        "memmel_sharpe_correction",
-        "diebold_mariano_predictive_loss"
-      ],
-      "report_p_values": true
-    },
-  
-    "ranking_analysis": {
-      "ranking_objective": "risk_balanced_performance",
-  
-      "ranking_metrics": [
-        {
-          "metric": "risk_parity_deviation_score",
-          "weight": 0.35,
-          "higher_is_better": false
-        },
-        {
-          "metric": "sharpe_ratio",
-          "weight": 0.25,
-          "higher_is_better": true
-        },
-        {
-          "metric": "max_drawdown",
-          "weight": 0.2,
-          "higher_is_better": false
-        },
-        {
-          "metric": "hhi_concentration",
-          "weight": 0.2,
-          "higher_is_better": false
-        }
-      ],
-  
-      "selection": {
-        "top_k": 25,
-        "also_report_percentiles": [
-          1,
-          5,
-          10
-        ]
-      }
-    },
-  
-    "computational_performance_analysis": {
-      "metrics": [
-        "runtime_per_optimization_ms",
-        "covariance_estimation_time_ms",
-        "risk_contribution_calculation_time_ms",
-        "solver_time_ms"
-      ],
-      "aggregation": [
-        "mean",
-        "median",
-        "p95"
-      ],
-      "interpretation_note": "ERC optimization trades computational cost for robustness against estimation error."
-    },
-  
-    "outputs": {
-      "markdown_tables": {
-        "root_path": "result_analysis/classical_optimization/risk_parity_erc/",
-  
-        "tables": [
-          {
-            "name": "erc_risk_contribution_balance.md",
-            "contents": [
-              "risk_contribution_variance",
-              "risk_contribution_std",
-              "risk_contribution_coefficient_of_variation",
-              "equal_risk_gap",
-              "risk_parity_deviation_score",
-              "risk_concentration_index"
-            ]
-          },
-          {
-            "name": "erc_portfolio_quality_summary.md",
-            "contents": [
-              "expected_return",
-              "volatility",
-              "sharpe_ratio",
-              "sortino_ratio",
-              "max_drawdown",
-              "calmar_ratio"
-            ]
-          },
-          {
-            "name": "erc_baseline_comparison.md",
-            "contents": [
-              "volatility_reduction_vs_baseline",
-              "sharpe_improvement_vs_baseline",
-              "risk_contribution_improvement_vs_baseline"
-            ]
-          },
-          {
-            "name": "erc_structure_metrics.md",
-            "contents": [
-              "num_assets_in_portfolio",
-              "effective_number_of_assets",
-              "hhi_concentration",
-              "weight_entropy"
-            ]
-          },
-          {
-            "name": "erc_runtime_profile.md",
-            "contents": [
-              "runtime_per_optimization_ms",
-              "covariance_estimation_time_ms",
-              "risk_contribution_calculation_time_ms",
-              "solver_time_ms"
-            ]
-          }
-        ]
-      },
-  
-      "report": {
-        "path": "result_analysis/classical_optimization/risk_parity_erc/erc_analysis_report.md",
-        "include_sections": [
-          "experimental_setup",
-          "risk_parity_and_erc_theory",
-          "risk_contribution_balance_results",
-          "portfolio_quality_and_downside_risk",
-          "comparison_with_baselines",
-          "robustness_and_sensitivity",
-          "statistical_significance",
-          "computational_performance",
-          "discussion"
-        ]
+      "reproducibility": {
+        "random_seed": 42,
+        "float_format": "%.6f",
+        "sort_portfolio_id_ascending": true
       }
     }
-  }
-  
+  },
+
+  "outputs": {
+    "root_results_dir": "result_analysis/classical_optimization/rp_erc",
+    "markdown_dir": "result_analysis/classical_optimization/rp_erc",
+    "figures_dir": "result_analysis/classical_optimization/rp_erc/figures",
+
+    "figures_subdirs": {
+      "risk_contributions": "result_analysis/classical_optimization/rp_erc/figures/01_risk_contributions",
+      "distribution": "result_analysis/classical_optimization/rp_erc/figures/02_distributions",
+      "baseline_comparison": "result_analysis/classical_optimization/rp_erc/figures/03_baseline_comparison",
+      "weights": "result_analysis/classical_optimization/rp_erc/figures/04_weights",
+      "runtime": "result_analysis/classical_optimization/rp_erc/figures/05_runtime"
+    },
+
+    "artifacts": {
+      "md_00_index": "result_analysis/classical_optimization/rp_erc/00_index.md",
+      "md_01_data_and_run_context": "result_analysis/classical_optimization/rp_erc/01_data_and_run_context.md",
+      "md_02_metrics_schema": "result_analysis/classical_optimization/rp_erc/02_metrics_schema.md",
+      "md_03_overall_summary": "result_analysis/classical_optimization/rp_erc/03_overall_summary.md",
+      "md_04_risk_contribution_analysis": "result_analysis/classical_optimization/rp_erc/04_risk_contribution_analysis.md",
+      "md_05_diversification_and_structure": "result_analysis/classical_optimization/rp_erc/05_diversification_and_structure.md",
+      "md_06_topk_portfolios": "result_analysis/classical_optimization/rp_erc/06_topk_portfolios.md",
+      "md_07_tail_portfolios": "result_analysis/classical_optimization/rp_erc/07_tail_portfolios.md",
+      "md_08_baseline_comparison": "result_analysis/classical_optimization/rp_erc/08_baseline_comparison.md",
+      "md_09_runtime_and_scalability": "result_analysis/classical_optimization/rp_erc/09_runtime_and_scalability.md",
+      "md_10_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/rp_erc/10_ieee_access_ready_paragraphs.md",
+      "md_11_figure_captions": "result_analysis/classical_optimization/rp_erc/11_figure_captions.md"
+    }
+  },
+
+  "execution_plan": {
+    "stage_0_validate_inputs": {
+      "checks": [
+        "verify_files_exist: results/classical_optimization/rp_erc_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/rp_erc_weights.parquet",
+        "verify_files_exist: results/classical_optimization/rp_erc_risk_contributions.parquet",
+        "verify_files_exist: results/classical_optimization/rp_erc_metrics_schema.json",
+        "ensure_dir: result_analysis/classical_optimization/rp_erc/figures"
+      ],
+      "fail_fast": true
+    },
+
+    "stage_1_load_and_profile": {
+      "load": [
+        "metrics_table_parquet",
+        "optimal_weights_parquet",
+        "risk_contribution_table_parquet",
+        "metrics_schema_json",
+        "summary_report_md"
+      ],
+      "derive": [
+        "basic_counts: num_portfolios, num_metrics",
+        "missingness_report",
+        "sanity_checks: weights_sum_to_one, non_negative_risk_contributions"
+      ]
+    },
+
+    "stage_2_generate_markdown_tables": {
+      "tables": [
+        {
+          "name": "risk_parity_deviation_stats",
+          "source": "metrics_table",
+          "stats": ["count", "mean", "std", "min", "p05", "p25", "p50", "p75", "p95", "max"],
+          "columns": [
+            "risk_parity_deviation_score",
+            "equal_risk_gap",
+            "risk_concentration_index",
+            "risk_contribution_std",
+            "risk_contribution_coefficient_of_variation"
+          ],
+          "output_md_section": "04_risk_contribution_analysis.md#Deviation-statistics"
+        },
+        {
+          "name": "topk_risk_parity_portfolios",
+          "source": "metrics_table",
+          "rank_by_each": ["risk_parity_deviation_score"],
+          "top_k": 10,
+          "columns": [
+            "portfolio_id",
+            "risk_parity_deviation_score",
+            "max_risk_contribution",
+            "min_risk_contribution",
+            "equal_risk_gap",
+            "volatility"
+          ],
+          "output_md_section": "06_topk_portfolios.md#Best-risk-parity-solutions"
+        },
+        {
+          "name": "baseline_comparison_summary",
+          "source": "metrics_table",
+          "stats": ["mean", "p50", "p75"],
+          "columns": [
+            "volatility_reduction_vs_baseline",
+            "sharpe_improvement_vs_baseline",
+            "risk_contribution_improvement_vs_baseline",
+            "erc_vs_equal_weight_volatility",
+            "erc_vs_equal_weight_sharpe"
+          ],
+          "output_md_section": "08_baseline_comparison.md#Comparison-summary"
+        }
+      ]
+    },
+
+    "stage_3_generate_figures": {
+      "style": {
+        "format": "png",
+        "dpi": 300,
+        "tight_layout": true,
+        "grid": true,
+        "font_size": 10
+      },
+      "figures": [
+        {
+          "id": "fig_01_risk_contribution_heatmap",
+          "type": "heatmap",
+          "source": "risk_contribution_table",
+          "select_portfolios": { "rank_by": "risk_parity_deviation_score", "top_k": 25 },
+          "output_path": "result_analysis/classical_optimization/rp_erc/figures/01_risk_contributions/fig_01_risk_contribution_heatmap.png"
+        },
+        {
+          "id": "fig_02_risk_parity_deviation_hist",
+          "type": "histogram",
+          "source": "metrics_table",
+          "column": "risk_parity_deviation_score",
+          "bins": 50,
+          "output_path": "result_analysis/classical_optimization/rp_erc/figures/02_distributions/fig_02_risk_parity_deviation_hist.png"
+        },
+        {
+          "id": "fig_03_volatility_vs_baseline",
+          "type": "scatter",
+          "source": "metrics_table",
+          "x": "baseline_portfolio_volatility",
+          "y": "volatility",
+          "output_path": "result_analysis/classical_optimization/rp_erc/figures/03_baseline_comparison/fig_03_volatility_vs_baseline.png"
+        }
+      ]
+    },
+
+    "stage_4_write_ieee_access_narratives": {
+      "markdown_docs": [
+        {
+          "path": "result_analysis/classical_optimization/rp_erc/10_ieee_access_ready_paragraphs.md",
+          "content_blocks": [
+            "Risk parity theory and equal risk contribution objective",
+            "Interpretation of risk contribution deviation metrics",
+            "Diversification advantages over return-driven optimization",
+            "Comparison against equal-weight and minimum-variance baselines",
+            "Limitations of volatility-based risk budgeting"
+          ]
+        }
+      ]
+    },
+
+    "stage_5_quality_checks": {
+      "checks": [
+        "all_markdown_files_exist",
+        "all_figure_files_exist",
+        "weights_sum_to_one",
+        "risk_contributions_sum_to_total_risk",
+        "risk_parity_deviation_non_negative"
+      ],
+      "write_audit_log": "result_analysis/classical_optimization/rp_erc/audit_log.json"
+    }
+  },
+
+  "cursor_implementation_tasks": [
+    {
+      "file": "result_analysis/classical_optimization/rp_erc/report_generation_rp_erc.py",
+      "changes": [
+        "Load RP/ERC artifacts and risk contribution tables.",
+        "Generate IEEE Access markdown tables and narratives.",
+        "Generate risk contribution and baseline comparison figures.",
+        "Run deviation, baseline, and sanity checks.",
+        "Emit audit log."
+      ]
+    }
+  ]
+}

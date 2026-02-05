@@ -1,266 +1,250 @@
 {
-    "analysis_task": "markowitz_mean_variance_classical_optimization_analysis",
-  
-    "analysis_principle": {
-      "optimization_scope": "portfolio_level",
-      "result_format": "markdown_tables_only",
-      "rationale": "Markowitz mean–variance optimization serves as a deterministic classical baseline. Results are communicated via interpretable markdown tables highlighting risk–return tradeoffs, portfolio structure, and known limitations under non-normal return distributions."
-    },
-  
-    "inputs": {
-      "metrics_table": "results/classical_optimization/markowitz_metrics.parquet",
-      "efficient_frontier": "results/classical_optimization/markowitz_efficient_frontier.parquet",
-      "metrics_schema": "results/classical_optimization/markowitz_metrics_schema.json",
-      "summary_report": "results/classical_optimization/markowitz_report.md"
-    },
-  
-    "analysis_scope": {
-      "level": "portfolio",
-      "dimensions": [
-        "portfolio_id",
-        "objective",
-        "risk_aversion"
-      ],
-      "grouping": {
-        "primary": "objective",
-        "secondary": "risk_aversion"
+  "task": "ieee_access_result_analysis_markdown_and_figures",
+  "version": "1.0.0",
+
+  "intent": {
+    "problem": "Need publication-grade (IEEE Access) result analysis for Markowitz Mean-Variance optimization outputs.",
+    "goal": "Generate markdown documents for all quantitative tables and narrative-ready summaries; generate all plots into figures/; ensure consistent naming, captions, and reproducibility metadata."
+  },
+
+  "inputs": {
+    "tool_name": "markowitz_mean_variance",
+
+    "run_artifacts": {
+      "llm_spec_reference": "src/classical_optimization/markowitz_mean_variance/llm.json",
+      "metrics_schema_json": "results/classical_optimization/markowitz_metrics_schema.json",
+      "summary_report_md": "results/classical_optimization/markowitz_report.md",
+      "runtime_profile_json": "results/classical_optimization/markowitz_runtime_profile.json",
+
+      "expected_outputs_from_pipeline": {
+        "optimal_portfolios": "results/classical_optimization/markowitz_optimal_weights.parquet",
+        "efficient_frontier": "results/classical_optimization/markowitz_efficient_frontier.parquet",
+        "metrics_table": "results/classical_optimization/markowitz_metrics.parquet",
+        "time_sliced_metrics": "results/classical_optimization/markowitz_time_sliced_metrics.parquet"
       }
     },
-  
-    "data_validation": {
-      "required_metrics": [
-        "expected_return",
-        "volatility",
-        "portfolio_variance",
-        "sharpe_ratio",
-        "max_drawdown"
-      ],
-      "consistency_checks": [
-        {
-          "name": "positive_variance",
-          "rule": "portfolio_variance > 0"
-        },
-        {
-          "name": "positive_volatility",
-          "rule": "volatility > 0"
-        }
-      ]
-    },
-  
-    "primary_performance_analysis": {
-      "risk_return_summary": {
-        "metrics": [
-          "expected_return",
-          "volatility",
-          "portfolio_variance",
-          "sharpe_ratio",
-          "sortino_ratio",
-          "calmar_ratio"
-        ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
+
+    "analysis_settings": {
+      "annualization": {
+        "trading_days_per_year": 252,
+        "risk_free_rate": 0.0001
       },
-  
-      "downside_and_tail_risk": {
-        "metrics": [
-          "value_at_risk_95",
-          "conditional_value_at_risk_95",
-          "value_at_risk_99",
-          "conditional_value_at_risk_99",
-          "max_drawdown",
-          "downside_deviation"
-        ],
-        "interpretation_note": "Tail risk is reported for diagnostic purposes only; optimization objective remains variance-based."
-      }
-    },
-  
-    "efficient_frontier_analysis": {
-      "enabled": true,
-      "frontier_source": "efficient_frontier",
-      "x_axis": "volatility",
-      "y_axis": "expected_return",
-      "group_by": [
-        "objective"
-      ],
-      "analysis_goals": [
-        "illustrate_classical_efficient_frontier",
-        "compare_min_variance_vs_max_sharpe",
-        "highlight_return_variance_tradeoff"
-      ]
-    },
-  
-    "portfolio_structure_analysis": {
-      "metrics": [
-        "num_assets_in_portfolio",
-        "hhi_concentration",
-        "effective_number_of_assets",
-        "weight_entropy",
-        "pairwise_correlation_mean"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ],
-      "interpretation_note": "Mean–variance portfolios often exhibit concentration under estimation error."
-    },
-  
-    "distributional_diagnostics": {
-      "metrics": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "interpretation_note": "Frequent rejection of normality highlights a core limitation of variance-based optimization."
-    },
-  
-    "robustness_checks": {
-      "objective_comparison": {
-        "compare": [
-          "min_variance",
-          "max_sharpe"
-        ],
-        "metrics": [
-          "expected_return",
-          "volatility",
-          "sharpe_ratio",
-          "max_drawdown"
-        ]
+      "risk_metrics": {
+        "var_alpha": 0.05,
+        "cvar_alpha": 0.05
       },
-  
-      "covariance_estimation_effect": {
-        "metrics": [
-          "portfolio_variance",
-          "sharpe_ratio"
-        ],
-        "note": "Ledoit–Wolf shrinkage mitigates but does not eliminate estimation error."
-      }
-    },
-  
-    "ranking_analysis": {
-      "ranking_objective": "classical_risk_adjusted_return",
-  
-      "ranking_metrics": [
-        {
-          "metric": "sharpe_ratio",
-          "weight": 0.45,
-          "higher_is_better": true
-        },
-        {
-          "metric": "sortino_ratio",
-          "weight": 0.25,
-          "higher_is_better": true
-        },
-        {
-          "metric": "max_drawdown",
-          "weight": 0.2,
-          "higher_is_better": false
-        },
-        {
-          "metric": "hhi_concentration",
-          "weight": 0.1,
-          "higher_is_better": false
-        }
-      ],
-  
-      "selection": {
-        "top_k": 25,
-        "also_report_percentiles": [
-          1,
-          5,
-          10
-        ]
-      }
-    },
-  
-    "computational_performance_analysis": {
-      "metrics": [
-        "runtime_per_optimization_ms",
-        "covariance_estimation_time_ms",
-        "solver_time_ms",
-        "p95_runtime_ms"
-      ],
-      "aggregation": [
-        "mean",
-        "median",
-        "p95"
-      ],
-      "interpretation_note": "Mean–variance optimization is computationally efficient but sensitive to input estimation."
-    },
-  
-    "outputs": {
-      "markdown_tables": {
-        "root_path": "result_analysis/classical_optimization/markowitz_mv/",
-  
-        "tables": [
-          {
-            "name": "markowitz_overall_performance_summary.md",
-            "contents": [
-              "expected_return",
-              "volatility",
-              "portfolio_variance",
-              "sharpe_ratio",
-              "sortino_ratio",
-              "max_drawdown",
-              "calmar_ratio"
-            ]
-          },
-          {
-            "name": "markowitz_efficient_frontier_summary.md",
-            "contents": [
-              "objective",
-              "expected_return",
-              "volatility",
-              "portfolio_variance"
-            ]
-          },
-          {
-            "name": "markowitz_top_portfolios_ranking.md",
-            "contents": [
-              "portfolio_id",
-              "objective",
-              "expected_return",
-              "sharpe_ratio",
-              "max_drawdown",
-              "hhi_concentration"
-            ]
-          },
-          {
-            "name": "markowitz_structure_metrics.md",
-            "contents": [
-              "num_assets_in_portfolio",
-              "effective_number_of_assets",
-              "hhi_concentration",
-              "weight_entropy"
-            ]
-          },
-          {
-            "name": "markowitz_runtime_profile.md",
-            "contents": [
-              "runtime_per_optimization_ms",
-              "covariance_estimation_time_ms",
-              "solver_time_ms",
-              "p95_runtime_ms"
-            ]
-          }
-        ]
+      "selection_rules": {
+        "top_k": 10,
+        "rank_by": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "expected_return"],
+        "tail_examples": 10
       },
-  
-      "report": {
-        "path": "result_analysis/classical_optimization/markowitz_mv/markowitz_analysis_report.md",
-        "include_sections": [
-          "experimental_setup",
-          "mean_variance_theory",
-          "efficient_frontier_results",
-          "risk_return_tradeoff",
-          "portfolio_structure_effects",
-          "distributional_limitations",
-          "computational_performance",
-          "discussion"
-        ]
+      "reproducibility": {
+        "random_seed": 42,
+        "float_format": "%.6f",
+        "sort_portfolio_id_ascending": true
       }
     }
-  }
-  
+  },
+
+  "outputs": {
+    "root_results_dir": "result_analysis/classical_optimization/markowitz_mv",
+    "markdown_dir": "result_analysis/classical_optimization/markowitz_mv/",
+    "figures_dir": "result_analysis/classical_optimization/markowitz_mv/figures",
+
+    "figures_subdirs": {
+      "distributions": "result_analysis/classical_optimization/markowitz_mv/figures/01_distributions",
+      "frontier": "result_analysis/classical_optimization/markowitz_mv/figures/02_efficient_frontier",
+      "risk_return": "result_analysis/classical_optimization/markowitz_mv/figures/03_risk_return",
+      "time_sliced": "result_analysis/classical_optimization/markowitz_mv/figures/04_time_sliced",
+      "weights": "result_analysis/classical_optimization/markowitz_mv/figures/05_weights",
+      "runtime": "result_analysis/classical_optimization/markowitz_mv/figures/06_runtime"
+    },
+
+    "artifacts": {
+      "md_00_index": "result_analysis/classical_optimization/markowitz_mv/00_index.md",
+      "md_01_data_and_run_context": "result_analysis/classical_optimization/markowitz_mv/01_data_and_run_context.md",
+      "md_02_metrics_schema": "result_analysis/classical_optimization/markowitz_mv/02_metrics_schema.md",
+      "md_03_overall_summary": "result_analysis/classical_optimization/markowitz_mv/03_overall_summary.md",
+      "md_04_distributional_properties": "result_analysis/classical_optimization/markowitz_mv/04_distributional_properties.md",
+      "md_05_risk_return_tradeoff": "result_analysis/classical_optimization/markowitz_mv/05_risk_return_tradeoff.md",
+      "md_06_topk_portfolios": "result_analysis/classical_optimization/markowitz_mv/06_topk_portfolios.md",
+      "md_07_tail_portfolios": "result_analysis/classical_optimization/markowitz_mv/07_tail_portfolios.md",
+      "md_08_weights_analysis": "result_analysis/classical_optimization/markowitz_mv/08_weights_analysis.md",
+      "md_09_time_sliced_performance": "result_analysis/classical_optimization/markowitz_mv/09_time_sliced_performance.md",
+      "md_10_runtime_and_scalability": "result_analysis/classical_optimization/markowitz_mv/10_runtime_and_scalability.md",
+      "md_11_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/markowitz_mv/11_ieee_access_ready_paragraphs.md",
+      "md_12_figure_captions": "result_analysis/classical_optimization/markowitz_mv/12_figure_captions.md"
+    }
+  },
+
+  "execution_plan": {
+    "stage_0_validate_inputs": {
+      "checks": [
+        "verify_files_exist: results/classical_optimization/markowitz_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/markowitz_optimal_weights.parquet",
+        "verify_files_exist: results/classical_optimization/markowitz_efficient_frontier.parquet",
+        "verify_files_exist: results/classical_optimization/markowitz_time_sliced_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/markowitz_metrics_schema.json",
+        "ensure_dir: result_analysis/classical_optimization/markowitz_mv/figures"
+      ],
+      "fail_fast": true
+    },
+
+    "stage_1_load_and_profile": {
+      "load": [
+        "metrics_table_parquet",
+        "optimal_weights_parquet",
+        "efficient_frontier_parquet",
+        "time_sliced_metrics_parquet",
+        "metrics_schema_json",
+        "runtime_profile_json",
+        "summary_report_md"
+      ],
+      "derive": [
+        "basic_counts: num_portfolios, num_metrics",
+        "missingness_report",
+        "sanity_checks: weights_sum_to_one, long_only_constraints"
+      ]
+    },
+
+    "stage_2_generate_markdown_tables": {
+      "tables": [
+        {
+          "name": "metrics_descriptive_stats",
+          "source": "metrics_table",
+          "stats": ["count", "mean", "std", "min", "p05", "p25", "p50", "p75", "p95", "max"],
+          "columns": [
+            "expected_return",
+            "volatility",
+            "portfolio_variance",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "max_drawdown",
+            "calmar_ratio",
+            "value_at_risk",
+            "conditional_value_at_risk",
+            "skewness",
+            "kurtosis",
+            "jarque_bera_p_value"
+          ],
+          "output_md_section": "03_overall_summary.md#Descriptive-statistics"
+        },
+        {
+          "name": "topk_by_rankers",
+          "source": "metrics_table",
+          "rank_by_each": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "expected_return"],
+          "top_k": 10,
+          "columns": [
+            "portfolio_id",
+            "expected_return",
+            "volatility",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "max_drawdown",
+            "value_at_risk",
+            "conditional_value_at_risk"
+          ],
+          "output_md_section": "06_topk_portfolios.md#Top-K-results"
+        },
+        {
+          "name": "tail_examples_by_rankers",
+          "source": "metrics_table",
+          "rank_by_each": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "expected_return"],
+          "tail_k": 10,
+          "columns": [
+            "portfolio_id",
+            "expected_return",
+            "volatility",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "max_drawdown",
+            "value_at_risk",
+            "conditional_value_at_risk"
+          ],
+          "output_md_section": "07_tail_portfolios.md#Tail-results"
+        }
+      ]
+    },
+
+    "stage_3_generate_figures": {
+      "style": {
+        "format": "png",
+        "dpi": 300,
+        "tight_layout": true,
+        "grid": true,
+        "font_size": 10
+      },
+      "figures": [
+        {
+          "id": "fig_01_efficient_frontier",
+          "type": "line_scatter",
+          "source": "efficient_frontier",
+          "x": "volatility",
+          "y": "expected_return",
+          "output_path": "result_analysis/classical_optimization/markowitz_mv/figures/02_efficient_frontier/fig_01_efficient_frontier.png"
+        },
+        {
+          "id": "fig_02_return_vol_scatter",
+          "type": "scatter",
+          "source": "metrics_table",
+          "x": "volatility",
+          "y": "expected_return",
+          "output_path": "result_analysis/classical_optimization/markowitz_mv/figures/03_risk_return/fig_02_return_vol_scatter.png"
+        },
+        {
+          "id": "fig_03_sharpe_hist",
+          "type": "histogram",
+          "source": "metrics_table",
+          "column": "sharpe_ratio",
+          "bins": 50,
+          "output_path": "result_analysis/classical_optimization/markowitz_mv/figures/01_distributions/fig_03_sharpe_hist.png"
+        },
+        {
+          "id": "fig_04_weights_heatmap_topk",
+          "type": "heatmap",
+          "source": "optimal_weights",
+          "select_portfolios": { "rank_by": "sharpe_ratio", "top_k": 25 },
+          "output_path": "result_analysis/classical_optimization/markowitz_mv/figures/05_weights/fig_04_weights_heatmap_topk.png"
+        }
+      ]
+    },
+
+    "stage_4_write_ieee_access_narratives": {
+      "markdown_docs": [
+        {
+          "path": "result_analysis/classical_optimization/markowitz_mv/11_ieee_access_ready_paragraphs.md",
+          "content_blocks": [
+            "Experimental setup (Markowitz assumptions and constraints)",
+            "Efficient frontier interpretation",
+            "Risk-return tradeoff findings",
+            "Distributional violations and tail risk implications",
+            "Limitations as classical baseline"
+          ]
+        }
+      ]
+    },
+
+    "stage_5_quality_checks": {
+      "checks": [
+        "all_markdown_files_exist",
+        "all_figure_files_exist",
+        "weights_sum_to_one",
+        "volatility_non_negative",
+        "efficient_frontier_monotonicity"
+      ],
+      "write_audit_log": "result_analysis/classical_optimization/markowitz_mv/audit_log.json"
+    }
+  },
+
+  "cursor_implementation_tasks": [
+    {
+      "file": "result_analysis/classical_optimization/markowitz_mv/report_generation_markowitz_mv.py",
+      "changes": [
+        "Load Markowitz artifacts and efficient frontier.",
+        "Generate IEEE Access markdown tables and narratives.",
+        "Generate efficient frontier and diagnostic figures.",
+        "Run quality checks and emit audit log."
+      ]
+    }
+  ]
+}

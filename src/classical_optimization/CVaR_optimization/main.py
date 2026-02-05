@@ -55,6 +55,85 @@ from .metrics import (
 from .report_generator import generate_report, generate_metrics_schema
 
 
+def _align_optimal_weights_to_assets(
+    optimal_weights: pd.Series,
+    returns_columns: List[str],
+    config: Dict
+) -> pd.Series:
+    """
+    Align optimal weights to returns DataFrame columns.
+    
+    Uses weight_alignment config: force_returns_columns, reindex_and_fill_zero,
+    normalize_after_alignment, tolerance_sum_to_one.
+    """
+    wa = config.get('weight_alignment', {})
+    mode = wa.get('mode', 'force_returns_columns')
+    on_mismatch = wa.get('on_mismatch', 'reindex_and_fill_zero')
+    normalize = wa.get('normalize_after_alignment', True)
+    tol = wa.get('tolerance_sum_to_one', 1e-8)
+    
+    target_index = returns_columns
+    if mode == 'force_returns_columns' and on_mismatch == 'reindex_and_fill_zero':
+        w = optimal_weights.reindex(target_index, fill_value=0.0)
+        if normalize and w.sum() > 0 and abs(w.sum() - 1.0) > tol:
+            w = w / w.sum()
+        return w
+    return optimal_weights
+
+
+def _validate_portfolio_returns(
+    portfolio_returns: pd.Series,
+    metrics_validation_config: Dict
+) -> Tuple[bool, Optional[str]]:
+    """
+    Validate portfolio returns before computing metrics.
+    
+    Returns (is_valid, invalid_reason). Invalid reason is None when valid.
+    """
+    mv = metrics_validation_config or {}
+    if not mv.get('require_non_empty_returns', True):
+        return True, None
+    returns_clean = portfolio_returns.dropna()
+    if len(returns_clean) == 0:
+        return False, 'empty_returns'
+    min_obs = mv.get('require_min_observations', 30)
+    if len(returns_clean) < min_obs:
+        return False, f'insufficient_observations_{len(returns_clean)}_lt_{min_obs}'
+    return True, None
+
+
+def _compute_completeness_audit(
+    result: Dict,
+    performance_metrics: Dict[str, List[str]],
+    expected_groups: List[str],
+    audit_config: Dict
+) -> Dict[str, Union[int, str, List[str]]]:
+    """
+    Compute metric completeness audit for a result row.
+    
+    Returns dict with present_count, missing_count, missing_list.
+    """
+    ac = audit_config.get('audit_columns', {})
+    present_field = ac.get('present_count_field', 'metrics_present_count')
+    missing_field = ac.get('missing_count_field', 'metrics_missing_count')
+    list_field = ac.get('missing_list_field', 'metrics_missing_list')
+    
+    expected_cols = []
+    for group in expected_groups:
+        cols = performance_metrics.get(group, [])
+        expected_cols.extend(cols)
+    
+    expected_cols = list(dict.fromkeys(expected_cols))  # dedupe preserving order
+    present = sum(1 for c in expected_cols if c in result and pd.notna(result.get(c)))
+    missing = [c for c in expected_cols if c not in result or pd.isna(result.get(c))]
+    
+    return {
+        present_field: present,
+        missing_field: len(missing),
+        list_field: missing
+    }
+
+
 def _save_restructured_json(
     json_path: Path,
     portfolio_results: List[Dict],
@@ -155,7 +234,10 @@ def _process_single_optimization(
     portfolio_id: Union[int, str],
     cvar_settings: Dict,
     risk_free_rate: float,
-    random_seed: Optional[int] = None
+    random_seed: Optional[int] = None,
+    modules: Optional[Dict] = None,
+    performance_logging: Optional[Dict] = None,
+    performance_metrics: Optional[Dict] = None
 ) -> Tuple[Dict, float]:
     """
     Process a single portfolio CVaR optimization.
@@ -243,8 +325,31 @@ def _process_single_optimization(
             portfolio_id=portfolio_id  # Pass for logging
         )
         
+        # Align optimal weights to returns columns (if module enabled)
+        modules_cfg = modules or {}
+        perf_log = performance_logging or {}
+        if modules_cfg.get('align_optimal_weights_to_assets', False) and perf_log.get('enabled'):
+            optimal_weights = _align_optimal_weights_to_assets(
+                optimal_weights,
+                returns_subset.columns.tolist(),
+                perf_log
+            )
+        
         # Compute portfolio returns
         portfolio_returns = (returns_subset * optimal_weights).sum(axis=1)
+        
+        # Validate portfolio returns before metrics (if module enabled)
+        invalid_reason = None
+        invalid_reason_field = None
+        if modules_cfg.get('validate_portfolio_returns_before_metrics', False) and perf_log.get('enabled'):
+            is_valid, invalid_reason = _validate_portfolio_returns(
+                portfolio_returns,
+                perf_log.get('metrics_validation', {})
+            )
+            if not is_valid:
+                invalid_reason_field = perf_log.get('metrics_validation', {}).get(
+                    'record_invalid_reason_field', 'metrics_invalid_reason'
+                )
         
         # Compute all metrics
         portfolio_stats = compute_portfolio_statistics(
@@ -318,6 +423,18 @@ def _process_single_optimization(
             'solver_time_ms': solver_time,
             'optimization_status': opt_info.get('status', 'unknown')
         }
+        if invalid_reason is not None and invalid_reason_field:
+            result[invalid_reason_field] = invalid_reason
+        
+        # Completeness audit (if module enabled)
+        if modules_cfg.get('log_metric_completeness', False) and perf_log.get('enabled'):
+            ca = perf_log.get('completeness_audit', {})
+            if ca.get('write_audit_columns') and performance_metrics:
+                expected_groups = ca.get('expected_metric_groups', [])
+                audit_result = _compute_completeness_audit(
+                    result, performance_metrics, expected_groups, ca
+                )
+                result.update(audit_result)
         
         # Log optimization status for first few portfolios
         if isinstance(portfolio_id, (int, str)) and str(portfolio_id) in ['0', '1', '2']:
@@ -373,6 +490,8 @@ def run_cvar_optimization(
     inputs = config['inputs']
     cvar_settings = config['cvar_settings']
     modules = config.get('modules', {})
+    performance_logging = config.get('performance_logging', {})
+    performance_metrics = config.get('performance_metrics', {})
     outputs = config['outputs']
     report_sections = config.get('report_sections', [])
     
@@ -439,7 +558,10 @@ def run_cvar_optimization(
             portfolio_id,
             cvar_settings,
             risk_free_rate,
-            random_seed=cvar_settings.get('random_seed')
+            random_seed=cvar_settings.get('random_seed'),
+            modules=modules,
+            performance_logging=performance_logging,
+            performance_metrics=performance_metrics
         )
         
         if result:

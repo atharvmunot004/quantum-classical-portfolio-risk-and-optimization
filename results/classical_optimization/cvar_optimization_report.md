@@ -1,6 +1,6 @@
 # CVaR Portfolio Optimization Report
 
-**Generated:** 2026-01-24 00:41:30
+**Generated:** 2026-02-05 11:37:51
 
 ## Methodology Overview
 
@@ -73,8 +73,8 @@ Portfolios on the efficient frontier minimize CVaR for a given target return.
 
 ## Portfolio Structure Effects
 
-- **Mean HHI Concentration:** 0.2500
-- **Mean Effective Number of Assets:** 4.00
+- **Mean HHI Concentration:** 0.0000
+- **Mean Effective Number of Assets:** nan
 
 ## Backtesting and Tail Risk Behavior
 
@@ -83,8 +83,8 @@ The optimized portfolios should demonstrate lower tail losses compared to mean-v
 
 ## Computational Performance
 
-- **Mean Runtime:** 18.28 ms
-- **Mean Solver Time:** 5.31 ms
+- **Mean Runtime:** 18.24 ms
+- **Mean Solver Time:** 3.63 ms
 
 ## Key Insights
 

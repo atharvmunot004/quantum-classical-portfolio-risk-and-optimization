@@ -1,278 +1,245 @@
 {
-    "analysis_task": "cvar_classical_optimization_analysis",
-  
-    "analysis_principle": {
-      "optimization_scope": "portfolio_level",
-      "result_format": "markdown_tables_only",
-      "rationale": "CVaR optimization results are best communicated through interpretable tabular summaries of tail risk, downside-adjusted performance, and portfolio structure. All outputs are rendered as Markdown tables suitable for direct inclusion in IEEE Access manuscripts."
-    },
-  
-    "inputs": {
-      "metrics_table": "results/classical_optimization/cvar_optimization_metrics.parquet",
-      "frontier_table": "results/classical_optimization/cvar_return_frontier.parquet",
-      "summary_report": "results/classical_optimization/cvar_optimization_report.md"
-    },
-  
-    "analysis_scope": {
-      "level": "portfolio",
-      "dimensions": [
-        "portfolio_id",
-        "confidence_level",
-        "estimation_window",
-        "target_return"
-      ],
-      "grouping": {
-        "primary": "confidence_level",
-        "secondary": "estimation_window"
+  "task": "ieee_access_result_analysis_markdown_and_figures",
+  "version": "1.0.0",
+
+  "intent": {
+    "problem": "Need publication-grade (IEEE Access) result analysis for CVaR-based portfolio optimization with scenario-driven tail-risk metrics.",
+    "goal": "Generate markdown documents for quantitative tables and IEEE-ready narratives; generate all CVaR-specific figures into figures/; ensure reproducibility and auditability."
+  },
+
+  "inputs": {
+    "tool_name": "cvar_optimization",
+
+    "run_artifacts": {
+      "llm_spec_reference": "src/classical_optimization/cvar/llm.json",
+      "metrics_schema_json": "results/classical_optimization/cvar_optimization_metrics_schema.json",
+      "summary_report_md": "results/classical_optimization/cvar_optimization_report.md",
+
+      "expected_outputs_from_pipeline": {
+        "optimal_portfolios": "results/classical_optimization/cvar_optimal_weights.parquet",
+        "cvar_return_frontier": "results/classical_optimization/cvar_return_frontier.parquet",
+        "metrics_table": "results/classical_optimization/cvar_optimization_metrics.parquet"
       }
     },
-  
-    "data_validation": {
-      "required_metrics": [
-        "expected_return",
-        "conditional_value_at_risk",
-        "value_at_risk",
-        "max_drawdown"
-      ],
-      "consistency_checks": [
-        {
-          "name": "cvar_ge_var",
-          "rule": "conditional_value_at_risk >= value_at_risk"
-        },
-        {
-          "name": "return_defined",
-          "rule": "isfinite(expected_return)"
-        }
-      ]
-    },
-  
-    "primary_performance_analysis": {
-      "tail_risk_focus": {
-        "metrics": [
-          "conditional_value_at_risk",
-          "expected_shortfall",
-          "worst_case_loss",
-          "expected_loss_beyond_cvar"
-        ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
+
+    "analysis_settings": {
+      "risk_metrics": {
+        "confidence_levels": [0.95, 0.99]
       },
-  
-      "risk_adjusted_performance": {
-        "metrics": [
-          "cvar_sharpe_ratio",
-          "cvar_sortino_ratio",
+      "selection_rules": {
+        "top_k": 10,
+        "rank_by": [
           "return_over_cvar",
+          "cvar",
+          "cvar_sharpe_ratio",
           "cvar_calmar_ratio"
         ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
+        "tail_examples": 10
       },
-  
-      "return_tradeoff": {
-        "metrics": [
-          "expected_return",
-          "volatility",
-          "value_at_risk",
-          "conditional_value_at_risk"
-        ],
-        "interpretation_note": "Illustrates the tradeoff between expected return and tail risk along the CVaR-efficient frontier."
-      }
-    },
-  
-    "frontier_analysis": {
-      "enabled": true,
-      "frontier_source": "cvar_return_frontier",
-      "x_axis": "conditional_value_at_risk",
-      "y_axis": "expected_return",
-      "group_by": [
-        "confidence_level",
-        "estimation_window"
-      ],
-      "analysis_goals": [
-        "identify_cvar_efficient_frontier",
-        "compare_frontiers_across_confidence_levels",
-        "assess_marginal_return_per_unit_tail_risk"
-      ]
-    },
-  
-    "portfolio_structure_analysis": {
-      "metrics": [
-        "num_assets_in_portfolio",
-        "hhi_concentration",
-        "effective_number_of_assets",
-        "weight_entropy",
-        "pairwise_correlation_mean"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ],
-      "interpretation_note": "CVaR optimization typically produces more diversified portfolios under tail-risk constraints."
-    },
-  
-    "distributional_diagnostics": {
-      "metrics": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "interpretation_note": "Highlights deviation from normality motivating scenario-based CVaR optimization."
-    },
-  
-    "robustness_and_sensitivity": {
-      "confidence_level_sensitivity": {
-        "compare_levels": [0.95, 0.99],
-        "metrics": [
-          "conditional_value_at_risk",
-          "return_over_cvar",
-          "cvar_sharpe_ratio"
-        ]
-      },
-  
-      "window_sensitivity": {
-        "compare_windows": [252, 500, 750],
-        "metrics": [
-          "conditional_value_at_risk",
-          "expected_return"
-        ]
-      },
-  
-      "constraint_impact": {
-        "metrics": [
-          "hhi_concentration",
-          "effective_number_of_assets",
-          "max_drawdown"
-        ]
-      }
-    },
-  
-    "ranking_analysis": {
-      "ranking_objective": "tail_risk_adjusted_return",
-  
-      "ranking_metrics": [
-        {
-          "metric": "return_over_cvar",
-          "weight": 0.4,
-          "higher_is_better": true
-        },
-        {
-          "metric": "cvar_sharpe_ratio",
-          "weight": 0.3,
-          "higher_is_better": true
-        },
-        {
-          "metric": "max_drawdown",
-          "weight": 0.2,
-          "higher_is_better": false
-        },
-        {
-          "metric": "hhi_concentration",
-          "weight": 0.1,
-          "higher_is_better": false
-        }
-      ],
-  
-      "selection": {
-        "top_k": 25,
-        "also_report_percentiles": [
-          1,
-          5,
-          10
-        ]
-      }
-    },
-  
-    "computational_performance_analysis": {
-      "metrics": [
-        "runtime_per_optimization_ms",
-        "scenario_construction_time_ms",
-        "solver_time_ms",
-        "p95_runtime_ms"
-      ],
-      "aggregation": [
-        "mean",
-        "median",
-        "p95"
-      ],
-      "interpretation_note": "Demonstrates scalability of linear programming–based CVaR optimization."
-    },
-  
-    "outputs": {
-      "markdown_tables": {
-        "root_path": "result_analysis/classical_optimization/cvar/",
-  
-        "tables": [
-          {
-            "name": "cvar_overall_tail_risk_summary.md",
-            "contents": [
-              "conditional_value_at_risk",
-              "expected_shortfall",
-              "worst_case_loss",
-              "return_over_cvar",
-              "cvar_sharpe_ratio"
-            ]
-          },
-          {
-            "name": "cvar_return_frontier_summary.md",
-            "contents": [
-              "target_return",
-              "expected_return",
-              "conditional_value_at_risk",
-              "value_at_risk"
-            ]
-          },
-          {
-            "name": "cvar_top_portfolios_ranking.md",
-            "contents": [
-              "portfolio_id",
-              "expected_return",
-              "conditional_value_at_risk",
-              "return_over_cvar",
-              "max_drawdown",
-              "hhi_concentration"
-            ]
-          },
-          {
-            "name": "cvar_structure_metrics.md",
-            "contents": [
-              "num_assets_in_portfolio",
-              "effective_number_of_assets",
-              "hhi_concentration",
-              "weight_entropy"
-            ]
-          },
-          {
-            "name": "cvar_runtime_profile.md",
-            "contents": [
-              "runtime_per_optimization_ms",
-              "solver_time_ms",
-              "scenario_construction_time_ms",
-              "p95_runtime_ms"
-            ]
-          }
-        ]
-      },
-  
-      "report": {
-        "path": "result_analysis/classical_optimization/cvar/cvar_analysis_report.md",
-        "include_sections": [
-          "experimental_setup",
-          "cvar_optimization_formulation",
-          "tail_risk_performance_summary",
-          "cvar_return_frontier_analysis",
-          "portfolio_structure_effects",
-          "robustness_and_sensitivity",
-          "computational_performance",
-          "discussion"
-        ]
+      "reproducibility": {
+        "random_seed": 42,
+        "float_format": "%.6f",
+        "sort_portfolio_id_ascending": true
       }
     }
-  }
-  
+  },
+
+  "outputs": {
+    "root_results_dir": "result_analysis/classical_optimization/cvar",
+    "markdown_dir": "result_analysis/classical_optimization/cvar",
+    "figures_dir": "result_analysis/classical_optimization/cvar/figures",
+
+    "figures_subdirs": {
+      "distributions": "result_analysis/classical_optimization/cvar/figures/01_distributions",
+      "frontier": "result_analysis/classical_optimization/cvar/figures/02_cvar_frontier",
+      "risk_return": "result_analysis/classical_optimization/cvar/figures/03_risk_return",
+      "tail_behavior": "result_analysis/classical_optimization/cvar/figures/04_tail_behavior",
+      "weights": "result_analysis/classical_optimization/cvar/figures/05_weights",
+      "runtime": "result_analysis/classical_optimization/cvar/figures/06_runtime"
+    },
+
+    "artifacts": {
+      "md_00_index": "result_analysis/classical_optimization/cvar/00_index.md",
+      "md_01_data_and_run_context": "result_analysis/classical_optimization/cvar/01_data_and_run_context.md",
+      "md_02_metrics_schema": "result_analysis/classical_optimization/cvar/02_metrics_schema.md",
+      "md_03_overall_summary": "result_analysis/classical_optimization/cvar/03_overall_summary.md",
+      "md_04_tail_risk_properties": "result_analysis/classical_optimization/cvar/04_tail_risk_properties.md",
+      "md_05_cvar_return_tradeoff": "result_analysis/classical_optimization/cvar/05_cvar_return_tradeoff.md",
+      "md_06_topk_portfolios": "result_analysis/classical_optimization/cvar/06_topk_portfolios.md",
+      "md_07_tail_portfolios": "result_analysis/classical_optimization/cvar/07_tail_portfolios.md",
+      "md_08_weights_analysis": "result_analysis/classical_optimization/cvar/08_weights_analysis.md",
+      "md_09_backtesting_and_coherence": "result_analysis/classical_optimization/cvar/09_backtesting_and_coherence.md",
+      "md_10_runtime_and_scalability": "result_analysis/classical_optimization/cvar/10_runtime_and_scalability.md",
+      "md_11_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/cvar/11_ieee_access_ready_paragraphs.md",
+      "md_12_figure_captions": "result_analysis/classical_optimization/cvar/12_figure_captions.md"
+    }
+  },
+
+  "execution_plan": {
+    "stage_0_validate_inputs": {
+      "checks": [
+        "verify_files_exist: results/classical_optimization/cvar_optimization_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/cvar_optimal_weights.parquet",
+        "verify_files_exist: results/classical_optimization/cvar_return_frontier.parquet",
+        "verify_files_exist: results/classical_optimization/cvar_optimization_metrics_schema.json",
+        "ensure_dir: result_analysis/classical_optimization/cvar/figures"
+      ],
+      "fail_fast": true
+    },
+
+    "stage_1_load_and_profile": {
+      "load": [
+        "metrics_table_parquet",
+        "optimal_weights_parquet",
+        "cvar_return_frontier_parquet",
+        "metrics_schema_json",
+        "summary_report_md"
+      ],
+      "derive": [
+        "basic_counts: num_portfolios, num_metrics, confidence_levels",
+        "missingness_report",
+        "sanity_checks: weights_sum_to_one, cvar_monotonicity_across_confidence"
+      ]
+    },
+
+    "stage_2_generate_markdown_tables": {
+      "tables": [
+        {
+          "name": "cvar_descriptive_stats",
+          "source": "metrics_table",
+          "stats": ["count", "mean", "std", "min", "p05", "p25", "p50", "p75", "p95", "max"],
+          "columns": [
+            "expected_return",
+            "cvar",
+            "var",
+            "return_over_cvar",
+            "cvar_sharpe_ratio",
+            "max_drawdown",
+            "tail_ratio",
+            "worst_case_loss",
+            "expected_loss_beyond_cvar"
+          ],
+          "output_md_section": "03_overall_summary.md#Descriptive-statistics"
+        },
+        {
+          "name": "topk_by_cvar_efficiency",
+          "source": "metrics_table",
+          "rank_by_each": [
+            "return_over_cvar",
+            "cvar",
+            "cvar_sharpe_ratio"
+          ],
+          "top_k": 10,
+          "columns": [
+            "portfolio_id",
+            "confidence_level",
+            "expected_return",
+            "cvar",
+            "return_over_cvar",
+            "max_drawdown"
+          ],
+          "output_md_section": "06_topk_portfolios.md#Top-K-CVaR-efficient-portfolios"
+        },
+        {
+          "name": "tail_examples",
+          "source": "metrics_table",
+          "rank_by_each": ["worst_case_loss"],
+          "tail_k": 10,
+          "columns": [
+            "portfolio_id",
+            "confidence_level",
+            "cvar",
+            "worst_case_loss",
+            "expected_loss_beyond_cvar"
+          ],
+          "output_md_section": "07_tail_portfolios.md#Worst-tail-behavior"
+        }
+      ]
+    },
+
+    "stage_3_generate_figures": {
+      "style": {
+        "format": "png",
+        "dpi": 300,
+        "tight_layout": true,
+        "grid": true,
+        "font_size": 10
+      },
+      "figures": [
+        {
+          "id": "fig_01_cvar_return_frontier",
+          "type": "line_scatter",
+          "source": "cvar_return_frontier",
+          "x": "cvar",
+          "y": "expected_return",
+          "group_by": "confidence_level",
+          "output_path": "result_analysis/classical_optimization/cvar/figures/02_cvar_frontier/fig_01_cvar_return_frontier.png"
+        },
+        {
+          "id": "fig_02_return_vs_cvar",
+          "type": "scatter",
+          "source": "metrics_table",
+          "x": "cvar",
+          "y": "expected_return",
+          "output_path": "result_analysis/classical_optimization/cvar/figures/03_risk_return/fig_02_return_vs_cvar.png"
+        },
+        {
+          "id": "fig_03_cvar_distribution",
+          "type": "histogram",
+          "source": "metrics_table",
+          "column": "cvar",
+          "bins": 50,
+          "output_path": "result_analysis/classical_optimization/cvar/figures/01_distributions/fig_03_cvar_distribution.png"
+        },
+        {
+          "id": "fig_04_tail_loss_distribution",
+          "type": "histogram",
+          "source": "metrics_table",
+          "column": "worst_case_loss",
+          "bins": 50,
+          "output_path": "result_analysis/classical_optimization/cvar/figures/04_tail_behavior/fig_04_tail_loss_distribution.png"
+        }
+      ]
+    },
+
+    "stage_4_write_ieee_access_narratives": {
+      "markdown_docs": [
+        {
+          "path": "result_analysis/classical_optimization/cvar/11_ieee_access_ready_paragraphs.md",
+          "content_blocks": [
+            "CVaR methodology and Rockafellar–Uryasev formulation",
+            "Interpretation of CVaR-return frontier",
+            "Tail-risk dominance over variance-based optimization",
+            "Backtesting and coherence properties of CVaR",
+            "Positioning relative to Markowitz and Black–Litterman"
+          ]
+        }
+      ]
+    },
+
+    "stage_5_quality_checks": {
+      "checks": [
+        "all_markdown_files_exist",
+        "all_figure_files_exist",
+        "weights_sum_to_one",
+        "cvar_non_increasing_with_confidence",
+        "cvar_greater_than_var",
+        "no_negative_expected_loss_beyond_cvar"
+      ],
+      "write_audit_log": "result_analysis/classical_optimization/cvar/audit_log.json"
+    }
+  },
+
+  "cursor_implementation_tasks": [
+    {
+      "file": "result_analysis/classical_optimization/cvar/report_generation_cvar.py",
+      "changes": [
+        "Load CVaR optimization artifacts.",
+        "Generate IEEE Access markdown tables and narratives.",
+        "Generate CVaR frontier, tail-risk, and diagnostic figures.",
+        "Run coherence and backtesting checks.",
+        "Emit audit log."
+      ]
+    }
+  ]
+}

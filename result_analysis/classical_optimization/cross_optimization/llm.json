@@ -1,297 +1,492 @@
 {
-    "analysis_task": "risk_parity_erc_classical_optimization_analysis",
-  
-    "analysis_principle": {
-      "optimization_scope": "portfolio_level",
-      "risk_model": "equal_risk_contribution",
-      "result_format": "markdown_tables_only",
-      "rationale": "Risk Parity (ERC) portfolios are evaluated through risk contribution balance, downside risk control, and diversification metrics. Results are communicated via markdown tables suitable for direct inclusion in IEEE Access manuscripts."
-    },
-  
-    "inputs": {
-      "metrics_table": "results/classical_optimization/rp_erc_metrics.parquet",
-      "metrics_schema": "results/classical_optimization/rp_erc_metrics_schema.json",
-      "summary_report": "results/classical_optimization/rp_erc_report.md"
-    },
-  
-    "analysis_scope": {
-      "level": "portfolio",
-      "dimensions": [
-        "portfolio_id",
-        "covariance_estimator",
-        "estimation_window",
-        "rebalancing_frequency"
+  "task": "ieee_access_cross_optimization_comparison_markdown_and_figures",
+  "version": "1.0.0",
+
+  "intent": {
+    "problem": "Need IEEE Access-grade cross-optimization comparison across classical portfolio optimization tools with consistent metrics, tables, and figures.",
+    "goal": "Standardize metric naming/units, compute comparable summaries, rank/dominance analysis, and generate markdown + figures suitable for direct insertion into the paper."
+  },
+
+  "inputs": {
+    "comparison_scope": {
+      "tools": [
+        "markowitz_mean_variance",
+        "black_litterman",
+        "cvar_optimization",
+        "risk_parity_erc"
       ],
-      "grouping": {
-        "primary": "covariance_estimator",
-        "secondary": "estimation_window"
+      "primary_confidence_level": 0.95,
+      "secondary_confidence_levels": [0.99],
+      "primary_horizon_days": 1
+    },
+
+    "run_artifacts": {
+      "markowitz_mean_variance": {
+        "llm_spec_reference": "src/classical_optimization/markowitz_mean_variance/llm.json",
+        "metrics_schema_json": "results/classical_optimization/markowitz_metrics_schema.json",
+        "summary_report_md": "results/classical_optimization/markowitz_report.md",
+        "expected_outputs": {
+          "metrics_table": "results/classical_optimization/markowitz_metrics.parquet",
+          "optimal_weights": "results/classical_optimization/markowitz_optimal_weights.parquet",
+          "efficient_frontier": "results/classical_optimization/markowitz_efficient_frontier.parquet"
+        }
+      },
+
+      "black_litterman": {
+        "llm_spec_reference": "src/classical_optimization/black_litterman/llm.json",
+        "metrics_schema_json": "results/classical_optimization/bl_metrics_schema.json",
+        "summary_report_md": "results/classical_optimization/bl_result_summary.md",
+        "expected_outputs": {
+          "metrics_table": "results/classical_optimization/bl_metrics.parquet",
+          "optimal_weights": "results/classical_optimization/bl_optimal_weights.parquet"
+        }
+      },
+
+      "cvar_optimization": {
+        "llm_spec_reference": "src/classical_optimization/cvar_optimization/llm.json",
+        "metrics_schema_json": "results/classical_optimization/cvar_optimization_metrics_schema.json",
+        "summary_report_md": "results/classical_optimization/cvar_optimization_report.md",
+        "expected_outputs": {
+          "metrics_table": "results/classical_optimization/cvar_optimization_metrics.parquet",
+          "optimal_weights": "results/classical_optimization/cvar_optimal_weights.parquet",
+          "cvar_return_frontier": "results/classical_optimization/cvar_return_frontier.parquet"
+        }
+      },
+
+      "risk_parity_erc": {
+        "llm_spec_reference": "src/classical_optimization/risk_parity_ERC/llm.json",
+        "metrics_schema_json": "results/classical_optimization/rp_erc_metrics_schema.json",
+        "summary_report_md": "results/classical_optimization/rp_erc_report.md",
+        "expected_outputs": {
+          "metrics_table": "results/classical_optimization/rp_erc_metrics.parquet",
+          "optimal_weights": "results/classical_optimization/rp_erc_weights.parquet",
+          "risk_contributions": "results/classical_optimization/rp_erc_risk_contributions.parquet"
+        }
       }
     },
-  
-    "data_validation": {
-      "required_metrics": [
-        "risk_parity_deviation_score",
-        "equal_risk_gap",
-        "volatility",
-        "max_drawdown"
-      ],
-      "consistency_checks": [
-        {
-          "name": "non_negative_risk_contributions",
-          "rule": "min_risk_contribution >= 0"
-        },
-        {
-          "name": "finite_deviation_score",
-          "rule": "isfinite(risk_parity_deviation_score)"
-        }
-      ]
-    },
-  
-    "primary_risk_parity_analysis": {
-      "risk_contribution_balance": {
-        "metrics": [
-          "risk_contribution_variance",
-          "risk_contribution_std",
-          "risk_contribution_coefficient_of_variation",
-          "equal_risk_gap",
-          "risk_parity_deviation_score",
-          "risk_concentration_index"
-        ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ],
-        "interpretation_note": "Lower deviation and variance indicate better adherence to equal risk contribution."
+
+    "analysis_settings": {
+      "annualization": {
+        "trading_days_per_year": 252,
+        "risk_free_rate": 0.0001
       },
-  
-      "portfolio_quality_metrics": {
-        "metrics": [
+
+      "metric_standardization": {
+        "canonical_metrics": [
           "expected_return",
           "volatility",
           "sharpe_ratio",
           "sortino_ratio",
           "max_drawdown",
-          "calmar_ratio"
+          "calmar_ratio",
+          "value_at_risk",
+          "conditional_value_at_risk",
+          "downside_deviation",
+          "skewness",
+          "kurtosis",
+          "jarque_bera_p_value",
+          "runtime_per_optimization_ms",
+          "solver_time_ms"
         ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
-      }
-    },
-  
-    "baseline_comparison_analysis": {
-      "enabled": true,
-      "baselines": [
-        "baseline_portfolios_from_file",
-        "equal_weight_same_assets",
-        "min_variance_same_assets"
-      ],
-      "comparison_metrics": [
-        "volatility_reduction_vs_baseline",
-        "sharpe_improvement_vs_baseline",
-        "risk_contribution_improvement_vs_baseline",
-        "erc_vs_equal_weight_volatility",
-        "erc_vs_equal_weight_sharpe",
-        "erc_vs_equal_weight_risk_contributions"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ]
-    },
-  
-    "downside_and_tail_risk_analysis": {
-      "metrics": [
-        "value_at_risk",
-        "conditional_value_at_risk",
-        "downside_deviation",
-        "semivariance",
-        "max_drawdown"
-      ],
-      "interpretation_note": "ERC portfolios often reduce volatility but may still exhibit tail losses under extreme correlations."
-    },
-  
-    "portfolio_structure_analysis": {
-      "metrics": [
-        "num_assets_in_portfolio",
-        "hhi_concentration",
-        "effective_number_of_assets",
-        "weight_entropy",
-        "pairwise_correlation_mean"
-      ],
-      "aggregation": [
-        "mean",
-        "median"
-      ],
-      "interpretation_note": "ERC encourages diversification by equalizing risk, not weights."
-    },
-  
-    "distributional_diagnostics": {
-      "metrics": [
-        "skewness",
-        "kurtosis",
-        "jarque_bera_p_value"
-      ],
-      "interpretation_note": "Normality is not assumed in ERC, but diagnostics contextualize tail behavior."
-    },
-  
-    "robustness_and_sensitivity": {
-      "covariance_estimator_sensitivity": {
-        "compare_estimators": [
-          "sample",
-          "oas",
-          "ewma"
-        ],
-        "metrics": [
-          "risk_parity_deviation_score",
-          "volatility",
-          "max_drawdown"
-        ]
-      },
-  
-      "window_sensitivity": {
-        "compare_windows": [252, 500, 750],
-        "metrics": [
-          "risk_parity_deviation_score",
-          "volatility"
-        ]
-      }
-    },
-  
-    "statistical_significance_analysis": {
-      "enabled": true,
-      "tests": [
-        "jobson_korkie_sharpe_difference",
-        "memmel_sharpe_correction",
-        "diebold_mariano_predictive_loss"
-      ],
-      "report_p_values": true
-    },
-  
-    "ranking_analysis": {
-      "ranking_objective": "risk_balanced_performance",
-  
-      "ranking_metrics": [
-        {
-          "metric": "risk_parity_deviation_score",
-          "weight": 0.35,
-          "higher_is_better": false
-        },
-        {
-          "metric": "sharpe_ratio",
-          "weight": 0.25,
-          "higher_is_better": true
-        },
-        {
-          "metric": "max_drawdown",
-          "weight": 0.2,
-          "higher_is_better": false
-        },
-        {
-          "metric": "hhi_concentration",
-          "weight": 0.2,
-          "higher_is_better": false
-        }
-      ],
-  
-      "selection": {
-        "top_k": 25,
-        "also_report_percentiles": [
-          1,
-          5,
-          10
-        ]
-      }
-    },
-  
-    "computational_performance_analysis": {
-      "metrics": [
-        "runtime_per_optimization_ms",
-        "covariance_estimation_time_ms",
-        "risk_contribution_calculation_time_ms",
-        "solver_time_ms"
-      ],
-      "aggregation": [
-        "mean",
-        "median",
-        "p95"
-      ],
-      "interpretation_note": "ERC optimization trades computational cost for robustness against estimation error."
-    },
-  
-    "outputs": {
-      "markdown_tables": {
-        "root_path": "result_analysis/classical_optimization/risk_parity_erc/",
-  
-        "tables": [
-          {
-            "name": "erc_risk_contribution_balance.md",
-            "contents": [
-              "risk_contribution_variance",
-              "risk_contribution_std",
-              "risk_contribution_coefficient_of_variation",
-              "equal_risk_gap",
-              "risk_parity_deviation_score",
-              "risk_concentration_index"
-            ]
+
+        "tool_metric_aliases": {
+          "markowitz_mean_variance": {
+            "expected_return": ["expected_return"],
+            "volatility": ["volatility"],
+            "sharpe_ratio": ["sharpe_ratio"],
+            "sortino_ratio": ["sortino_ratio"],
+            "max_drawdown": ["max_drawdown"],
+            "calmar_ratio": ["calmar_ratio"],
+            "value_at_risk": ["value_at_risk", "value_at_risk_95"],
+            "conditional_value_at_risk": ["conditional_value_at_risk", "conditional_value_at_risk_95"],
+            "downside_deviation": ["downside_deviation"],
+            "skewness": ["skewness"],
+            "kurtosis": ["kurtosis"],
+            "jarque_bera_p_value": ["jarque_bera_p_value"],
+            "runtime_per_optimization_ms": ["runtime_per_optimization_ms"],
+            "solver_time_ms": ["solver_time_ms"]
           },
-          {
-            "name": "erc_portfolio_quality_summary.md",
-            "contents": [
-              "expected_return",
-              "volatility",
-              "sharpe_ratio",
-              "sortino_ratio",
-              "max_drawdown",
-              "calmar_ratio"
-            ]
+
+          "black_litterman": {
+            "expected_return": ["mean_return", "expected_return"],
+            "volatility": ["volatility"],
+            "sharpe_ratio": ["sharpe_ratio"],
+            "sortino_ratio": ["sortino_ratio"],
+            "max_drawdown": ["max_drawdown"],
+            "calmar_ratio": ["calmar_ratio"],
+            "value_at_risk": ["value_at_risk"],
+            "conditional_value_at_risk": ["conditional_value_at_risk"],
+            "downside_deviation": ["downside_deviation"],
+            "skewness": ["skewness"],
+            "kurtosis": ["kurtosis"],
+            "jarque_bera_p_value": ["jarque_bera_p_value"],
+            "runtime_per_optimization_ms": ["runtime_per_optimization_ms"],
+            "solver_time_ms": ["solver_time_ms"]
           },
-          {
-            "name": "erc_baseline_comparison.md",
-            "contents": [
-              "volatility_reduction_vs_baseline",
-              "sharpe_improvement_vs_baseline",
-              "risk_contribution_improvement_vs_baseline"
-            ]
+
+          "cvar_optimization": {
+            "expected_return": ["expected_return"],
+            "volatility": ["volatility"],
+            "sharpe_ratio": ["sharpe_ratio"],
+            "sortino_ratio": ["sortino_ratio"],
+            "max_drawdown": ["max_drawdown"],
+            "calmar_ratio": ["calmar_ratio"],
+            "value_at_risk": ["var", "value_at_risk", "var_95"],
+            "conditional_value_at_risk": ["cvar", "conditional_value_at_risk", "cvar_95"],
+            "downside_deviation": ["downside_deviation"],
+            "skewness": ["skewness"],
+            "kurtosis": ["kurtosis"],
+            "jarque_bera_p_value": ["jarque_bera_p_value"],
+            "runtime_per_optimization_ms": ["runtime_per_optimization_ms"],
+            "solver_time_ms": ["solver_time_ms"]
           },
-          {
-            "name": "erc_structure_metrics.md",
-            "contents": [
-              "num_assets_in_portfolio",
-              "effective_number_of_assets",
-              "hhi_concentration",
-              "weight_entropy"
-            ]
-          },
-          {
-            "name": "erc_runtime_profile.md",
-            "contents": [
-              "runtime_per_optimization_ms",
-              "covariance_estimation_time_ms",
-              "risk_contribution_calculation_time_ms",
-              "solver_time_ms"
-            ]
+
+          "risk_parity_erc": {
+            "expected_return": ["expected_return", "annualized_return"],
+            "volatility": ["volatility", "annualized_volatility"],
+            "sharpe_ratio": ["sharpe_ratio"],
+            "sortino_ratio": ["sortino_ratio"],
+            "max_drawdown": ["max_drawdown"],
+            "calmar_ratio": ["calmar_ratio"],
+            "value_at_risk": ["value_at_risk", "value_at_risk_95_1d"],
+            "conditional_value_at_risk": ["conditional_value_at_risk", "conditional_value_at_risk_95_1d"],
+            "downside_deviation": ["downside_deviation"],
+            "skewness": ["skewness"],
+            "kurtosis": ["kurtosis"],
+            "jarque_bera_p_value": ["jarque_bera_p_value"],
+            "runtime_per_optimization_ms": ["runtime_per_optimization_ms"],
+            "solver_time_ms": ["solver_time_ms"]
           }
-        ]
+        },
+
+        "rules": {
+          "confidence_level_filtering": {
+            "enabled": true,
+            "field_candidates": ["confidence_level"],
+            "prefer": 0.95,
+            "also_compute_for": [0.99]
+          },
+          "sign_conventions": {
+            "drawdown": "allow_either_negative_or_fraction; normalize_to_fraction_in_[0,1]_if_possible",
+            "var_cvar": "treat_as_loss_magnitude_if_mixed; normalize_to_positive_loss_magnitude"
+          }
+        }
       },
-  
-      "report": {
-        "path": "result_analysis/classical_optimization/risk_parity_erc/erc_analysis_report.md",
-        "include_sections": [
-          "experimental_setup",
-          "risk_parity_and_erc_theory",
-          "risk_contribution_balance_results",
-          "portfolio_quality_and_downside_risk",
-          "comparison_with_baselines",
-          "robustness_and_sensitivity",
-          "statistical_significance",
-          "computational_performance",
-          "discussion"
-        ]
+
+      "selection_rules": {
+        "top_k_per_tool": 10,
+        "rank_by": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "expected_return"],
+        "tail_k_per_tool": 10
+      },
+
+      "reproducibility": {
+        "random_seed": 42,
+        "float_format": "%.6f",
+        "sort_tool_then_portfolio_id": true
       }
     }
-  }
-  
+  },
+
+  "outputs": {
+    "root_results_dir": "result_analysis/classical_optimization/cross_optimization",
+    "markdown_dir": "result_analysis/classical_optimization/cross_optimization",
+    "figures_dir": "result_analysis/classical_optimization/cross_optimization/figures",
+
+    "figures_subdirs": {
+      "overview": "result_analysis/classical_optimization/cross_optimization/figures/01_overview",
+      "risk_return": "result_analysis/classical_optimization/cross_optimization/figures/02_risk_return",
+      "tail_risk": "result_analysis/classical_optimization/cross_optimization/figures/03_tail_risk",
+      "stability": "result_analysis/classical_optimization/cross_optimization/figures/04_stability",
+      "runtime": "result_analysis/classical_optimization/cross_optimization/figures/05_runtime"
+    },
+
+    "artifacts": {
+      "md_00_index": "result_analysis/classical_optimization/cross_optimization/00_index.md",
+      "md_01_data_and_method_map": "result_analysis/classical_optimization/cross_optimization/01_data_and_method_map.md",
+      "md_02_metric_harmonization": "result_analysis/classical_optimization/cross_optimization/02_metric_harmonization.md",
+      "md_03_global_summary_table": "result_analysis/classical_optimization/cross_optimization/03_global_summary_table.md",
+      "md_04_ranking_and_dominance": "result_analysis/classical_optimization/cross_optimization/04_ranking_and_dominance.md",
+      "md_05_tail_risk_comparison": "result_analysis/classical_optimization/cross_optimization/05_tail_risk_comparison.md",
+      "md_06_runtime_scalability": "result_analysis/classical_optimization/cross_optimization/06_runtime_scalability.md",
+      "md_07_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/cross_optimization/07_ieee_access_ready_paragraphs.md",
+      "md_08_figure_captions": "result_analysis/classical_optimization/cross_optimization/08_figure_captions.md",
+      "audit_log_json": "result_analysis/classical_optimization/cross_optimization/audit_log.json",
+      "harmonized_metrics_parquet": "result_analysis/classical_optimization/cross_optimization/harmonized_metrics.parquet"
+    }
+  },
+
+  "execution_plan": {
+    "stage_0_validate_inputs": {
+      "checks": [
+        "ensure_dir: result_analysis/classical_optimization/cross_optimization/figures",
+        "verify_files_exist: results/classical_optimization/markowitz_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/bl_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/cvar_optimization_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/rp_erc_metrics.parquet"
+      ],
+      "fail_fast": true
+    },
+
+    "stage_1_load": {
+      "load": [
+        "markowitz.metrics_table_parquet",
+        "black_litterman.metrics_table_parquet",
+        "cvar_optimization.metrics_table_parquet",
+        "risk_parity_erc.metrics_table_parquet"
+      ]
+    },
+
+    "stage_2_harmonize_metrics": {
+      "operations": [
+        "add_column: tool_name",
+        "filter_rows_by_confidence_level_if_present (prefer=0.95; also retain 0.99 for sensitivity appendix)",
+        "resolve_aliases_to_canonical_metrics",
+        "normalize_sign_conventions_for_var_cvar_and_drawdown",
+        "compute_missing_canonical_metrics_if_possible (e.g., return_over_cvar if return & cvar exist)",
+        "write_harmonized_metrics_parquet"
+      ],
+      "output": "harmonized_metrics_parquet"
+    },
+
+    "stage_3_cross_tool_summaries": {
+      "tables": [
+        {
+          "name": "tool_level_summary",
+          "group_by": ["tool_name"],
+          "aggregate": {
+            "expected_return": ["mean", "p50", "p75", "p95"],
+            "volatility": ["mean", "p50", "p75", "p95"],
+            "sharpe_ratio": ["mean", "p50", "p75", "p95"],
+            "sortino_ratio": ["mean", "p50", "p75", "p95"],
+            "max_drawdown": ["mean", "p50", "p75", "p95"],
+            "conditional_value_at_risk": ["mean", "p50", "p75", "p95"],
+            "runtime_per_optimization_ms": ["mean", "p50", "p95"]
+          },
+          "output_md": "03_global_summary_table.md#Tool-level-summary"
+        },
+        {
+          "name": "topk_per_tool",
+          "method": "rank_within_group",
+          "group_by": ["tool_name"],
+          "rank_by_each": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "expected_return"],
+          "top_k": 10,
+          "columns": [
+            "tool_name",
+            "portfolio_id",
+            "expected_return",
+            "volatility",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "max_drawdown",
+            "value_at_risk",
+            "conditional_value_at_risk",
+            "runtime_per_optimization_ms"
+          ],
+          "output_md": "04_ranking_and_dominance.md#Top-k-within-tool"
+        },
+        {
+          "name": "tailk_per_tool",
+          "method": "rank_within_group_tail",
+          "group_by": ["tool_name"],
+          "rank_by_each": ["sharpe_ratio", "conditional_value_at_risk", "max_drawdown"],
+          "tail_k": 10,
+          "columns": [
+            "tool_name",
+            "portfolio_id",
+            "expected_return",
+            "volatility",
+            "sharpe_ratio",
+            "max_drawdown",
+            "conditional_value_at_risk"
+          ],
+          "output_md": "05_tail_risk_comparison.md#Worst-case-examples"
+        }
+      ],
+
+      "dominance_analysis": {
+        "enabled": true,
+        "pareto_objectives": [
+          { "metric": "expected_return", "direction": "max" },
+          { "metric": "volatility", "direction": "min" },
+          { "metric": "conditional_value_at_risk", "direction": "min" },
+          { "metric": "max_drawdown", "direction": "min" }
+        ],
+        "outputs": {
+          "dominance_table_md": "04_ranking_and_dominance.md#Pareto-dominance"
+        }
+      }
+    },
+
+    "stage_4_generate_figures": {
+      "style": {
+        "format": "png",
+        "dpi": 300,
+        "tight_layout": true,
+        "grid": true,
+        "font_size": 10
+      },
+
+      "figures": [
+        {
+          "id": "fig_01_tool_summary_bars",
+          "type": "bar_multi_metric_tool_level",
+          "source": "harmonized_metrics",
+          "metrics": ["sharpe_ratio", "max_drawdown", "conditional_value_at_risk"],
+          "aggregation": "median",
+          "output_path": "result_analysis/classical_optimization/cross_optimization/figures/01_overview/fig_01_tool_summary_bars.png"
+        },
+        {
+          "id": "fig_02_risk_return_scatter_by_tool",
+          "type": "scatter_by_group",
+          "source": "harmonized_metrics",
+          "x": "volatility",
+          "y": "expected_return",
+          "group_by": "tool_name",
+          "annotate": { "mode": "topk_per_group", "rank_by": "sharpe_ratio", "k": 3 },
+          "output_path": "result_analysis/classical_optimization/cross_optimization/figures/02_risk_return/fig_02_risk_return_scatter_by_tool.png"
+        },
+        {
+          "id": "fig_03_tail_risk_scatter_by_tool",
+          "type": "scatter_by_group",
+          "source": "harmonized_metrics",
+          "x": "conditional_value_at_risk",
+          "y": "expected_return",
+          "group_by": "tool_name",
+          "output_path": "result_analysis/classical_optimization/cross_optimization/figures/03_tail_risk/fig_03_tail_risk_scatter_by_tool.png"
+        },
+        {
+          "id": "fig_04_runtime_comparison",
+          "type": "boxplot_by_group",
+          "source": "harmonized_metrics",
+          "x": "tool_name",
+          "y": "runtime_per_optimization_ms",
+          "output_path": "result_analysis/classical_optimization/cross_optimization/figures/05_runtime/fig_04_runtime_comparison.png"
+        },
+        {
+          "id": "fig_05_confidence_level_sensitivity",
+          "type": "paired_metric_delta_plot",
+          "source": "cvar_optimization.metrics_table",
+          "group_by": "tool_name",
+          "metric_pairs": [
+            { "metric_95": "cvar_95", "metric_99": "cvar_99", "label": "CVaR (0.95 vs 0.99)" },
+            { "metric_95": "var_95", "metric_99": "var_99", "label": "VaR (0.95 vs 0.99)" }
+          ],
+          "output_path": "result_analysis/classical_optimization/cross_optimization/figures/04_stability/fig_05_confidence_level_sensitivity.png"
+        }
+      ]
+    },
+
+    "stage_5_write_ieee_access_markdown": {
+      "markdown_docs": [
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/00_index.md",
+          "content_blocks": [
+            "Purpose and scope of cross-optimization comparison",
+            "Folder map: markdown + figures",
+            "List of generated tables and figures with relative paths",
+            "Reproducibility footer (seed, versions, timestamps if available)"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/01_data_and_method_map.md",
+          "content_blocks": [
+            "Method map: Markowitz vs Black-Litterman vs CVaR vs RP/ERC (objective + constraints + solver family)",
+            "Evaluation and metric extraction assumptions",
+            "Notes on confidence level filtering and horizon alignment"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/02_metric_harmonization.md",
+          "content_blocks": [
+            "Canonical metric set and alias resolution table",
+            "Sign convention normalization rules (drawdown, VaR/CVaR)",
+            "Missing metric policy: compute if possible; else mark NA and exclude from that specific comparison"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/03_global_summary_table.md",
+          "content_blocks": [
+            "Tool-level summary table (median + tail percentiles)",
+            "Interpretation: which tool dominates by risk-adjusted return vs tail risk"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/04_ranking_and_dominance.md",
+          "content_blocks": [
+            "Top-k tables per tool",
+            "Pareto dominance analysis and narrative interpretation",
+            "Practical guidance: selecting tool based on objective (variance vs tail risk vs risk parity)"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/05_tail_risk_comparison.md",
+          "content_blocks": [
+            "Cross-tool tail-risk comparison (CVaR, VaR, drawdown)",
+            "Worst-case examples table",
+            "Confidence-level sensitivity discussion (0.95 vs 0.99 where available)"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/06_runtime_scalability.md",
+          "content_blocks": [
+            "Runtime distribution comparison across tools",
+            "Tradeoff narrative: quality vs compute cost",
+            "Notes on solver families (QP vs LP vs nonlinear) and expected scaling"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/07_ieee_access_ready_paragraphs.md",
+          "content_blocks": [
+            "Drop-in IEEE Access paragraphs: Setup, Metrics, Cross-tool Findings, Discussion, Limitations",
+            "No first-person; explicit figure/table callouts"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/cross_optimization/08_figure_captions.md",
+          "content_blocks": [
+            "Caption list for all figures (Fig. 1, Fig. 2, ...)",
+            "Each caption: what it shows + why it matters (1-2 sentences)"
+          ]
+        }
+      ]
+    },
+
+    "stage_6_quality_checks": {
+      "checks": [
+        "all_markdown_files_exist",
+        "all_figure_files_exist",
+        "harmonized_metrics_non_empty",
+        "tool_name_coverage_complete",
+        "var_cvar_sign_normalized_to_loss_magnitude",
+        "drawdown_normalized_to_fraction_if_possible"
+      ],
+      "write_audit_log": "result_analysis/classical_optimization/cross_optimization/audit_log.json"
+    }
+  },
+
+  "cursor_implementation_tasks": [
+    {
+      "file": "result_analysis/classical_optimization/cross_optimization/report_generation_cross_opt.py",
+      "changes": [
+        "Load metrics from each tool (parquet) and add tool_name.",
+        "Filter/align confidence levels (prefer 0.95) and horizons where applicable.",
+        "Harmonize metric names into canonical schema and normalize sign conventions.",
+        "Generate IEEE Access markdown summaries, rankings, and Pareto dominance tables.",
+        "Generate cross-tool figures (risk-return, tail-risk, runtime, sensitivity).",
+        "Run checks and emit harmonized_metrics.parquet and audit_log.json."
+      ]
+    },
+    {
+      "file": "utils/md_writer.py",
+      "changes": [
+        "Add helper for multi-tool summary tables and Pareto-dominance markdown formatting."
+      ]
+    },
+    {
+      "file": "utils/plotting.py",
+      "changes": [
+        "Add plotting utilities: scatter_by_group, boxplot_by_group, bar_multi_metric_tool_level, paired_metric_delta_plot."
+      ]
+    }
+  ]
+}
