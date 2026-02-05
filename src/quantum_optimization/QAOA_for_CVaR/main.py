@@ -180,10 +180,22 @@ def run_qaoa_portfolio_optimization(
     # Get CPU configuration for parallel processing
     parallel_config = config.get('parallelization', {})
     cpu_percent = parallel_config.get('cpu_percent', 0.8)  # Use 80% of cores by default
-    n_jobs = parallel_config.get('n_jobs', None)  # None = auto
+    n_jobs_raw = parallel_config.get('n_jobs', None)  # None = auto
+    
+    # Convert n_jobs to int if provided, otherwise use None for auto
+    if n_jobs_raw is not None:
+        try:
+            n_jobs = int(n_jobs_raw)
+        except (ValueError, TypeError):
+            n_jobs = None
+    else:
+        n_jobs = None
     
     if n_jobs is None:
         n_jobs = get_optimal_worker_count(cpu_percent=cpu_percent)
+    else:
+        # Ensure n_jobs is within valid range
+        n_jobs = get_optimal_worker_count(max_workers=n_jobs)
     
     total_cores = cpu_count()
     logger.info(f"CPU parallelization: Using {n_jobs} workers out of {total_cores} cores ({n_jobs/total_cores*100:.1f}%)")
