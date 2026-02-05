@@ -1,246 +1,392 @@
 {
-    "analysis_task": "black_litterman_classical_optimization_analysis",
-  
-    "analysis_principle": {
-      "optimization_scope": "portfolio_level",
-      "result_format": "markdown_tables_only",
-      "rationale": "Classical optimization results are best communicated via interpretable summary tables (mean return, risk, drawdown, risk-adjusted ratios). All tabular outputs are rendered as Markdown documents suitable for direct inclusion in IEEE Access manuscripts."
-    },
-  
-    "inputs": {
-      "metrics_table": "results/classical_optimization/bl_metrics.parquet",
-      "time_sliced_metrics_table": "results/classical_optimization/bl_time_sliced_metrics.parquet",
-      "runtime_profile": "results/classical_optimization/bl_runtime_profile.json",
-      "metrics_schema": "results/classical_optimization/bl_metrics_schema.json"
-    },
-  
-    "analysis_scope": {
-      "level": "portfolio",
-      "dimensions": [
-        "portfolio_id"
-      ],
-      "grouping": {
-        "primary": "asset_set_id",
-        "secondary": "views_confidence_level"
+  "task": "ieee_access_result_analysis_markdown_and_figures",
+  "version": "1.0.0",
+
+  "intent": {
+    "problem": "Need publication-grade (IEEE Access) result analysis for Black-Litterman optimization outputs, with reproducible tables/figures.",
+    "goal": "Generate markdown documents for all quantitative tables and narrative-ready summaries; generate all plots into figures/; ensure consistent naming, captions, and reproducibility metadata."
+  },
+
+  "inputs": {
+    "tool_name": "black_litterman",
+    "run_artifacts": {
+      "llm_spec_reference": "src/classical_optimization/black_litterman/llm.json",
+      "metrics_schema_json": "results/classical_optimization/bl_metrics_schema.json",
+      "summary_report_md": "results/classical_optimization/bl_result_summary.md",
+      "runtime_profile_json": "results/classical_optimization/bl_runtime_profile.json",
+
+      "expected_outputs_from_pipeline": {
+        "optimal_portfolios": "results/classical_optimization/bl_optimal_weights.parquet",
+        "posterior_returns": "results/classical_optimization/bl_posterior_returns.parquet",
+        "posterior_covariance": "results/classical_optimization/bl_posterior_covariance.parquet",
+        "portfolio_daily_returns_matrix": "results/classical_optimization/bl_portfolio_daily_returns.npy",
+        "metrics_table": "results/classical_optimization/bl_metrics.parquet",
+        "time_sliced_metrics": "results/classical_optimization/bl_time_sliced_metrics.parquet"
       }
     },
-  
-    "data_validation": {
-      "required_metrics": [
-        "mean_return",
-        "volatility",
-        "sharpe_ratio",
-        "sortino_ratio",
-        "max_drawdown",
-        "calmar_ratio",
-        "value_at_risk",
-        "conditional_value_at_risk"
+
+    "analysis_settings": {
+      "annualization": {
+        "trading_days_per_year": 252,
+        "risk_free_rate": 0.0001
+      },
+      "risk_metrics": {
+        "var_alpha": 0.05,
+        "cvar_alpha": 0.05
+      },
+      "selection_rules": {
+        "top_k": 10,
+        "rank_by": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "mean_return"],
+        "tail_examples": 10
+      },
+      "reproducibility": {
+        "random_seed": 42,
+        "float_format": "%.6f",
+        "sort_portfolio_id_ascending": true
+      }
+    }
+  },
+
+  "outputs": {
+    "root_results_dir": "result_analysis/classical_optimization/black_litterman",
+    "markdown_dir": "result_analysis/classical_optimization/black_litterman/",
+    "figures_dir": "result_analysis/classical_optimization/black_litterman/figures",
+    "figures_subdirs": {
+      "distributions": "result_analysis/classical_optimization/black_litterman/figures/01_distributions",
+      "frontier_and_scatter": "result_analysis/classical_optimization/black_litterman/figures/02_frontier_scatter",
+      "risk_drawdown": "result_analysis/classical_optimization/black_litterman/figures/03_risk_drawdown",
+      "timesliced": "result_analysis/classical_optimization/black_litterman/figures/04_time_sliced",
+      "weights": "result_analysis/classical_optimization/black_litterman/figures/05_weights",
+      "runtime": "result_analysis/classical_optimization/black_litterman/figures/06_runtime"
+    },
+    "artifacts": {
+      "md_00_index": "result_analysis/classical_optimization/black_litterman/00_index.md",
+      "md_01_data_and_run_context": "result_analysis/classical_optimization/black_litterman/01_data_and_run_context.md",
+      "md_02_metrics_schema": "result_analysis/classical_optimization/black_litterman/02_metrics_schema.md",
+      "md_03_overall_summary": "result_analysis/classical_optimization/black_litterman_ieee_access/markdown/03_overall_summary.md",
+      "md_04_distributional_properties": "result_analysis/classical_optimization/black_litterman/04_distributional_properties.md",
+      "md_05_risk_return_tradeoff": "result_analysis/classical_optimization/black_litterman/05_risk_return_tradeoff.md",
+      "md_06_topk_portfolios": "result_analysis/classical_optimization/black_litterman/06_topk_portfolios.md",
+      "md_07_tail_portfolios": "result_analysis/classical_optimization/black_litterman/07_tail_portfolios.md",
+      "md_08_weights_analysis": "result_analysis/classical_optimization/black_litterman/08_weights_analysis.md",
+      "md_09_time_sliced_performance": "result_analysis/classical_optimization/black_litterman/09_time_sliced_performance.md",
+      "md_10_runtime_and_scalability": "result_analysis/classical_optimization/black_litterman/10_runtime_and_scalability.md",
+      "md_11_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/black_litterman/11_ieee_access_ready_paragraphs.md",
+      "md_12_figure_captions": "result_analysis/classical_optimization/black_litterman/12_figure_captions.md"
+    }
+  },
+
+  "execution_plan": {
+    "stage_0_validate_inputs": {
+      "checks": [
+        "verify_files_exist: results/classical_optimization/bl_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/bl_optimal_weights.parquet",
+        "verify_files_exist: results/classical_optimization/bl_time_sliced_metrics.parquet",
+        "verify_files_exist: results/classical_optimization/bl_portfolio_daily_returns.npy",
+        "verify_files_exist: /mnt/data/bl_metrics_schema.json",
+        "ensure_dir: result_analysis/classical_optimization/black_litterman_ieee_access/markdown",
+        "ensure_dir: figures/black_litterman"
       ],
-      "consistency_checks": [
+      "fail_fast": true
+    },
+
+    "stage_1_load_and_profile": {
+      "load": [
+        "metrics_table_parquet",
+        "optimal_weights_parquet",
+        "time_sliced_metrics_parquet",
+        "portfolio_daily_returns_matrix_npy",
+        "metrics_schema_json",
+        "runtime_profile_json",
+        "summary_report_md"
+      ],
+      "derive": [
+        "basic_counts: num_portfolios, num_metrics, date_range_if_available",
+        "missingness_report",
+        "sanity_checks: bounds_on_weights, fully_invested_if_declared, long_only_if_declared"
+      ]
+    },
+
+    "stage_2_generate_markdown_tables": {
+      "tables": [
         {
-          "name": "positive_volatility",
-          "rule": "volatility > 0"
+          "name": "metrics_descriptive_stats",
+          "source": "metrics_table",
+          "stats": ["count", "mean", "std", "min", "p01", "p05", "p25", "p50", "p75", "p95", "p99", "max"],
+          "columns": ["mean_return", "volatility", "sharpe_ratio", "sortino_ratio", "max_drawdown", "calmar_ratio", "value_at_risk", "conditional_value_at_risk", "skewness", "kurtosis", "jarque_bera_p_value"],
+          "output_md_section": "03_overall_summary.md#Descriptive-statistics"
         },
         {
-          "name": "cvar_ge_var",
-          "rule": "conditional_value_at_risk >= value_at_risk"
+          "name": "topk_by_rankers",
+          "source": "metrics_table",
+          "rank_by_each": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "mean_return"],
+          "top_k": 10,
+          "columns": ["portfolio_id", "mean_return", "volatility", "sharpe_ratio", "sortino_ratio", "max_drawdown", "calmar_ratio", "value_at_risk", "conditional_value_at_risk"],
+          "output_md_section": "06_topk_portfolios.md#Top-K-results"
+        },
+        {
+          "name": "tail_examples_by_rankers",
+          "source": "metrics_table",
+          "rank_by_each": ["sharpe_ratio", "sortino_ratio", "calmar_ratio", "mean_return"],
+          "tail_k": 10,
+          "columns": ["portfolio_id", "mean_return", "volatility", "sharpe_ratio", "sortino_ratio", "max_drawdown", "calmar_ratio", "value_at_risk", "conditional_value_at_risk"],
+          "output_md_section": "07_tail_portfolios.md#Tail-results"
+        },
+        {
+          "name": "time_sliced_summary",
+          "source": "time_sliced_metrics",
+          "group_by": ["year"],
+          "aggregate": {
+            "mean_return": ["mean", "p50", "p75", "p95"],
+            "volatility": ["mean", "p50"],
+            "sharpe_ratio": ["mean", "p50", "p75", "p95"],
+            "max_drawdown": ["mean", "p50", "p75", "p95"],
+            "value_at_risk": ["mean", "p50"],
+            "conditional_value_at_risk": ["mean", "p50"]
+          },
+          "output_md_section": "09_time_sliced_performance.md#Year-wise-aggregates"
+        },
+        {
+          "name": "weights_concentration_summary",
+          "source": "optimal_weights",
+          "metrics": ["herfindahl_hirschman_index", "top1_weight", "top3_weight_sum", "top5_weight_sum", "nonzero_count"],
+          "output_md_section": "08_weights_analysis.md#Concentration-and-sparsity"
         }
       ]
     },
-  
-    "primary_performance_analysis": {
-      "return_risk_tradeoff": {
-        "metrics": [
-          "mean_return",
-          "volatility",
-          "sharpe_ratio"
-        ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
+
+    "stage_3_generate_figures": {
+      "style": {
+        "format": "png",
+        "dpi": 300,
+        "tight_layout": true,
+        "grid": true,
+        "font_size": 10
       },
-  
-      "downside_risk_analysis": {
-        "metrics": [
-          "max_drawdown",
-          "value_at_risk",
-          "conditional_value_at_risk",
-          "sortino_ratio",
-          "calmar_ratio"
-        ],
-        "aggregation": [
-          "mean",
-          "median",
-          "p95"
-        ]
-      },
-  
-      "distributional_characteristics": {
-        "metrics": [
-          "skewness",
-          "kurtosis",
-          "jarque_bera_p_value"
-        ],
-        "interpretation_note": "Used to highlight deviation from normality despite mean–variance optimization assumptions."
-      }
-    },
-  
-    "ranking_analysis": {
-      "ranking_objective": "risk_adjusted_return",
-  
-      "ranking_metrics": [
+      "figures": [
         {
-          "metric": "sharpe_ratio",
-          "weight": 0.4,
-          "higher_is_better": true
+          "id": "fig_01_sharpe_hist",
+          "type": "histogram",
+          "source": "metrics_table",
+          "column": "sharpe_ratio",
+          "bins": 50,
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/01_distributions/fig_01_sharpe_hist.png"
         },
         {
-          "metric": "sortino_ratio",
-          "weight": 0.3,
-          "higher_is_better": true
+          "id": "fig_02_return_vol_scatter",
+          "type": "scatter",
+          "source": "metrics_table",
+          "x": "volatility",
+          "y": "mean_return",
+          "annotate_topk_by": "sharpe_ratio",
+          "top_k": 10,
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/02_frontier_scatter/fig_02_return_vol_scatter.png"
         },
         {
-          "metric": "max_drawdown",
-          "weight": 0.2,
-          "higher_is_better": false
+          "id": "fig_03_sharpe_vs_drawdown",
+          "type": "scatter",
+          "source": "metrics_table",
+          "x": "max_drawdown",
+          "y": "sharpe_ratio",
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/03_risk_drawdown/fig_03_sharpe_vs_drawdown.png"
         },
         {
-          "metric": "conditional_value_at_risk",
-          "weight": 0.1,
-          "higher_is_better": false
+          "id": "fig_04_var_cvar_scatter",
+          "type": "scatter",
+          "source": "metrics_table",
+          "x": "value_at_risk",
+          "y": "conditional_value_at_risk",
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/03_risk_drawdown/fig_04_var_cvar_scatter.png"
+        },
+        {
+          "id": "fig_05_jarque_bera_pvalue_hist",
+          "type": "histogram",
+          "source": "metrics_table",
+          "column": "jarque_bera_p_value",
+          "bins": 50,
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/01_distributions/fig_05_jb_pvalue_hist.png"
+        },
+        {
+          "id": "fig_06_yearwise_sharpe_boxplot",
+          "type": "boxplot",
+          "source": "time_sliced_metrics",
+          "x": "year",
+          "y": "sharpe_ratio",
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/04_time_sliced/fig_06_yearwise_sharpe_boxplot.png"
+        },
+        {
+          "id": "fig_07_yearwise_drawdown_boxplot",
+          "type": "boxplot",
+          "source": "time_sliced_metrics",
+          "x": "year",
+          "y": "max_drawdown",
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/04_time_sliced/fig_07_yearwise_drawdown_boxplot.png"
+        },
+        {
+          "id": "fig_08_weights_heatmap_topk",
+          "type": "heatmap",
+          "source": "optimal_weights",
+          "select_portfolios": { "rank_by": "sharpe_ratio", "top_k": 25, "metrics_source": "metrics_table" },
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/05_weights/fig_08_weights_heatmap_topk.png"
+        },
+        {
+          "id": "fig_09_weights_top_assets_bar",
+          "type": "bar_topn",
+          "source": "optimal_weights",
+          "aggregation": "mean_weight_across_portfolios",
+          "top_n": 10,
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/05_weights/fig_09_weights_top_assets_bar.png"
+        },
+        {
+          "id": "fig_10_runtime_stage_breakdown",
+          "type": "bar",
+          "source": "runtime_profile_json",
+          "keys": ["stage_A_precompute", "stage_B_expand_weights", "stage_C_batch_evaluate"],
+          "output_path": "result_analysis/classical_optimization/black_litterman/figures/06_runtime/fig_10_runtime_stage_breakdown.png"
         }
+      ]
+    },
+
+    "stage_4_write_ieee_access_narratives": {
+      "markdown_docs": [
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/00_index.md",
+          "content_blocks": [
+            "Purpose + folder map",
+            "List of generated tables and figures with relative paths",
+            "Reproducibility footer (seed, versions, timestamps if available)"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/01_data_and_run_context.md",
+          "content_blocks": [
+            "Reference configuration summary (read key fields from src/classical_optimization/black_litterman/llm.json)",
+            "Data inputs used (paths, return_type, risk_free_rate, window length, tau, risk_aversion)",
+            "Compute strategy notes (precompute registry, batching, GPU availability from runtime_profile)"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/02_metrics_schema.md",
+          "content_blocks": [
+            "Reprint metrics schema as markdown table (name, dtype, description)",
+            "Metadata: generated_at, num_metrics, num_portfolios"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/03_overall_summary.md",
+          "content_blocks": [
+            "High-level performance summary with descriptive stats table",
+            "Interpretation guidance (risk-return, downside risk, tail risk, normality diagnostics)",
+            "Pointers to figures 01-05"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/04_distributional_properties.md",
+          "content_blocks": [
+            "Skewness/kurtosis/JB p-value interpretation across portfolios",
+            "Discuss implications for VaR/CVaR reliability and non-normality",
+            "Embed figure references for distribution plots"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/05_risk_return_tradeoff.md",
+          "content_blocks": [
+            "Return vs volatility scatter analysis, highlight top-k by Sharpe",
+            "Risk-return narrative suitable for IEEE Access results section",
+            "Refer to scatter figures"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/06_topk_portfolios.md",
+          "content_blocks": [
+            "Top-k tables by Sharpe/Sortino/Calmar/Mean return",
+            "Short bullet insights: stability, drawdown, tail metrics differences"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/07_tail_portfolios.md",
+          "content_blocks": [
+            "Bottom-k tables by Sharpe/Sortino/Calmar/Mean return",
+            "Failure mode notes (e.g., high drawdown, negative returns, extreme tails)"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/08_weights_analysis.md",
+          "content_blocks": [
+            "Weight concentration metrics (HHI, top-k mass, sparsity)",
+            "Heatmap and top-assets bar figure references",
+            "Interpretation: diversification vs concentration"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/09_time_sliced_performance.md",
+          "content_blocks": [
+            "Year-wise aggregates table",
+            "Boxplots discussion: regime sensitivity, performance consistency",
+            "Highlight best/worst years by median Sharpe and drawdown"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/10_runtime_and_scalability.md",
+          "content_blocks": [
+            "Reproduce runtime_profile.json summary",
+            "Discuss stage-wise timing + GPU availability",
+            "Scalability narrative aligned with 100K portfolios batching"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/11_ieee_access_ready_paragraphs.md",
+          "content_blocks": [
+            "Drop-in paragraphs: Experimental setup, Metrics, Key findings, Discussion, Limitations",
+            "Written in IEEE Access tone, no first-person, with figure/table callouts"
+          ]
+        },
+        {
+          "path": "result_analysis/classical_optimization/black_litterman/12_figure_captions.md",
+          "content_blocks": [
+            "List captions for every figure id (Fig. 1, Fig. 2, ...)",
+            "Each caption: what it shows + why it matters (1-2 sentences)"
+          ]
+        }
+      ]
+    },
+
+    "stage_5_quality_checks": {
+      "checks": [
+        "all_markdown_files_exist",
+        "all_figure_files_exist",
+        "no_empty_tables",
+        "portfolio_id_consistency_between_metrics_and_weights",
+        "basic_metric_range_checks: volatility>=0, max_drawdown<=0_or_in_[0,1]_depending_convention, cvar<=var_if_signed_convention"
       ],
-  
-      "selection": {
-        "top_k": 25,
-        "also_report_percentiles": [
-          1,
-          5,
-          10
-        ]
-      }
-    },
-  
-    "time_sliced_performance": {
-      "enabled": true,
-      "slice_unit": "calendar_year",
-      "metrics": [
-        "mean_return",
-        "volatility",
-        "sharpe_ratio",
-        "max_drawdown"
-      ],
-      "minimum_observations": 200,
-      "interpretation_goal": "Evaluate robustness of BL portfolios across market regimes."
-    },
-  
-    "views_impact_analysis": {
-      "enabled": true,
-      "compare_by": "views_confidence_level",
-      "metrics": [
-        "mean_return",
-        "volatility",
-        "sharpe_ratio",
-        "max_drawdown"
-      ],
-      "interpretation_note": "Higher-confidence views should improve risk-adjusted performance without increasing drawdowns excessively."
-    },
-  
-    "computational_performance_analysis": {
-      "runtime_breakdown": {
-        "stages": [
-          "stage_A_precompute",
-          "stage_B_expand_weights",
-          "stage_C_batch_evaluate"
-        ],
-        "report_units": "seconds"
-      },
-  
-      "scalability_metrics": {
-        "total_portfolios": 100000,
-        "runtime_per_1k_portfolios": "total_time / 100"
-      },
-  
-      "report_note": "Demonstrates feasibility of Black–Litterman optimization at large scale via asset-set precomputation."
-    },
-  
-    "outputs": {
-      "markdown_tables": {
-        "root_path": "result_analysis/classical_optimization/black_litterman/",
-  
-        "tables": [
-          {
-            "name": "bl_overall_performance_summary.md",
-            "contents": [
-              "mean_return",
-              "volatility",
-              "sharpe_ratio",
-              "sortino_ratio",
-              "max_drawdown",
-              "calmar_ratio",
-              "value_at_risk",
-              "conditional_value_at_risk"
-            ]
-          },
-          {
-            "name": "bl_top_portfolios_ranking.md",
-            "contents": [
-              "portfolio_id",
-              "mean_return",
-              "sharpe_ratio",
-              "sortino_ratio",
-              "max_drawdown",
-              "conditional_value_at_risk"
-            ]
-          },
-          {
-            "name": "bl_time_sliced_performance.md",
-            "contents": [
-              "year",
-              "mean_return",
-              "volatility",
-              "sharpe_ratio",
-              "max_drawdown"
-            ]
-          },
-          {
-            "name": "bl_views_confidence_comparison.md",
-            "contents": [
-              "views_confidence_level",
-              "mean_return",
-              "volatility",
-              "sharpe_ratio",
-              "max_drawdown"
-            ]
-          },
-          {
-            "name": "bl_runtime_profile.md",
-            "contents": [
-              "stage_A_precompute",
-              "stage_B_expand_weights",
-              "stage_C_batch_evaluate",
-              "total_time",
-              "runtime_per_1k_portfolios"
-            ]
-          }
-        ]
-      },
-  
-      "report": {
-        "path": "result_analysis/classical_optimization/black_litterman/bl_analysis_report.md",
-        "include_sections": [
-          "experimental_setup",
-          "black_litterman_model_overview",
-          "portfolio_performance_summary",
-          "risk_and_drawdown_analysis",
-          "impact_of_investor_views",
-          "temporal_robustness",
-          "computational_scalability",
-          "discussion"
-        ]
-      }
+      "write_audit_log": "result_analysis/classical_optimization/black_litterman_ieee_access/audit_log.json"
     }
-  }
-  
+  },
+
+  "cursor_implementation_tasks": [
+    {
+      "file": "result_analysis/classical_optimization/black_litterman/report_generation_bl.py",
+      "changes": [
+        "Load BL artifacts (metrics parquet, time-sliced parquet, weights parquet, returns matrix npy).",
+        "Generate markdown tables (descriptive stats, top-k, tail-k, year-wise aggregates, weights concentration).",
+        "Generate figures into figures/black_litterman/* (histograms, scatters, boxplots, heatmap, runtime bar).",
+        "Write IEEE Access-ready narratives and captions markdown files.",
+        "Run quality checks and write audit_log.json."
+      ]
+    },
+    {
+      "file": "utils/md_writer.py",
+      "changes": [
+        "Helper to write consistent markdown tables with float formatting and captions.",
+        "Helper to emit relative figure paths and standardized figure references."
+      ]
+    },
+    {
+      "file": "utils/plotting.py",
+      "changes": [
+        "Matplotlib-only plotting utilities: hist, scatter, boxplot, heatmap, bar charts.",
+        "Save with dpi=300 and tight_layout."
+      ]
+    }
+  ]
+}

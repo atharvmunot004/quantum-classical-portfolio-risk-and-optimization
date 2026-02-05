@@ -80,9 +80,44 @@
         "jarque_bera"
       ],
   
-      "runtime_metrics": true
+      "runtime_metrics": true,
+      "align_optimal_weights_to_assets": true,
+      "validate_portfolio_returns_before_metrics": true,
+      "log_metric_completeness": true
     },
-  
+
+    "performance_logging": {
+      "enabled": true,
+      "weight_alignment": {
+        "mode": "force_returns_columns",
+        "on_mismatch": "reindex_and_fill_zero",
+        "normalize_after_alignment": true,
+        "tolerance_sum_to_one": 1e-8
+      },
+      "metrics_validation": {
+        "require_non_empty_returns": true,
+        "require_min_observations": 30,
+        "on_invalid": "log_and_continue",
+        "record_invalid_reason_field": "metrics_invalid_reason"
+      },
+      "completeness_audit": {
+        "expected_metric_groups": [
+          "portfolio_quality",
+          "risk_metrics",
+          "structure",
+          "normality_checks",
+          "tail_risk_analysis",
+          "runtime"
+        ],
+        "write_audit_columns": true,
+        "audit_columns": {
+          "present_count_field": "metrics_present_count",
+          "missing_count_field": "metrics_missing_count",
+          "missing_list_field": "metrics_missing_list"
+        }
+      }
+    },
+
     "performance_metrics": {
       "portfolio_quality": [
         "expected_return",
