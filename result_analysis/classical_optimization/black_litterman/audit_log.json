@@ -1,0 +1,18 @@
+{
+  "validation_checks": {
+    "num_portfolios": 100000,
+    "num_metrics": 12,
+    "missing_columns": [],
+    "negative_volatility_count": 0,
+    "positive_drawdown_count": 100000
+  },
+  "quality_checks": {
+    "all_markdown_files_exist": true,
+    "all_figure_files_exist": false,
+    "metrics_table_empty": false,
+    "weights_table_empty": false,
+    "volatility_non_negative": true,
+    "drawdown_non_positive": false,
+    "cvar_leq_var": false
+  }
+}

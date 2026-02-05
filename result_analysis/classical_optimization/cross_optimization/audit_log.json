@@ -1,0 +1,15 @@
+{
+  "quality_checks": {
+    "harmonized_metrics_non_empty": true,
+    "tool_name_coverage_complete": true,
+    "var_cvar_sign_normalized_to_loss_magnitude": true,
+    "drawdown_normalized_to_fraction_if_possible": true
+  },
+  "num_portfolios": 2919000,
+  "tools": [
+    "markowitz_mean_variance",
+    "black_litterman",
+    "cvar_optimization",
+    "risk_parity_erc"
+  ]
+}

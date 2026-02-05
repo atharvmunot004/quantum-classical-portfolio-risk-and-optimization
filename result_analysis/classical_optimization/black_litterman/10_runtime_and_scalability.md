@@ -1,0 +1,22 @@
+# Runtime and Scalability
+
+## Runtime Profile
+
+```json
+{
+  "stages": {
+    "stage_A_precompute": 13320.483632802963,
+    "stage_B_expand_weights": 1.1128818988800049,
+    "stage_C_batch_evaluate": 985.7040407657623
+  },
+  "total_time": 14320.97786450386,
+  "gpu_info": {
+    "available": false,
+    "library": null,
+    "device": null
+  }
+}
+```
+
+## Figure References
+- Figure 10: Runtime stage breakdown

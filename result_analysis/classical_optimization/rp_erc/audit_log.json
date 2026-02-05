@@ -1,0 +1,17 @@
+{
+  "validation_checks": {
+    "num_portfolios": 2619000,
+    "num_metrics": 52,
+    "missing_columns": [],
+    "risk_parity_deviation_non_negative": true
+  },
+  "quality_checks": {
+    "all_markdown_files_exist": true,
+    "all_figure_files_exist": false,
+    "metrics_table_empty": false,
+    "weights_table_empty": true,
+    "weights_sum_to_one": false,
+    "risk_contributions_sum_to_total_risk": false,
+    "risk_parity_deviation_non_negative": true
+  }
+}
