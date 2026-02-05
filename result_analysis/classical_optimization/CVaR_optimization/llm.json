@@ -45,33 +45,33 @@
   },
 
   "outputs": {
-    "root_results_dir": "result_analysis/classical_optimization/cvar",
-    "markdown_dir": "result_analysis/classical_optimization/cvar",
-    "figures_dir": "result_analysis/classical_optimization/cvar/figures",
+    "root_results_dir": "result_analysis/classical_optimization/CVaR_optimization",
+    "markdown_dir": "result_analysis/classical_optimization/CVaR_optimization/",
+    "figures_dir": "result_analysis/classical_optimization/CVaR_optimization/figures",
 
     "figures_subdirs": {
-      "distributions": "result_analysis/classical_optimization/cvar/figures/01_distributions",
-      "frontier": "result_analysis/classical_optimization/cvar/figures/02_cvar_frontier",
-      "risk_return": "result_analysis/classical_optimization/cvar/figures/03_risk_return",
-      "tail_behavior": "result_analysis/classical_optimization/cvar/figures/04_tail_behavior",
-      "weights": "result_analysis/classical_optimization/cvar/figures/05_weights",
-      "runtime": "result_analysis/classical_optimization/cvar/figures/06_runtime"
+      "distributions": "result_analysis/classical_optimization/CVaR_optimization/figures/01_distributions",
+      "frontier": "result_analysis/classical_optimization/CVaR_optimization/figures/02_cvar_frontier",
+      "risk_return": "result_analysis/classical_optimization/CVaR_optimization/figures/03_risk_return",
+      "tail_behavior": "result_analysis/classical_optimization/CVaR_optimization/figures/04_tail_behavior",
+      "weights": "result_analysis/classical_optimization/CVaR_optimization/figures/05_weights",
+      "runtime": "result_analysis/classical_optimization/CVaR_optimization/figures/06_runtime"
     },
 
     "artifacts": {
-      "md_00_index": "result_analysis/classical_optimization/cvar/00_index.md",
-      "md_01_data_and_run_context": "result_analysis/classical_optimization/cvar/01_data_and_run_context.md",
-      "md_02_metrics_schema": "result_analysis/classical_optimization/cvar/02_metrics_schema.md",
-      "md_03_overall_summary": "result_analysis/classical_optimization/cvar/03_overall_summary.md",
-      "md_04_tail_risk_properties": "result_analysis/classical_optimization/cvar/04_tail_risk_properties.md",
-      "md_05_cvar_return_tradeoff": "result_analysis/classical_optimization/cvar/05_cvar_return_tradeoff.md",
-      "md_06_topk_portfolios": "result_analysis/classical_optimization/cvar/06_topk_portfolios.md",
-      "md_07_tail_portfolios": "result_analysis/classical_optimization/cvar/07_tail_portfolios.md",
-      "md_08_weights_analysis": "result_analysis/classical_optimization/cvar/08_weights_analysis.md",
-      "md_09_backtesting_and_coherence": "result_analysis/classical_optimization/cvar/09_backtesting_and_coherence.md",
-      "md_10_runtime_and_scalability": "result_analysis/classical_optimization/cvar/10_runtime_and_scalability.md",
-      "md_11_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/cvar/11_ieee_access_ready_paragraphs.md",
-      "md_12_figure_captions": "result_analysis/classical_optimization/cvar/12_figure_captions.md"
+      "md_00_index": "result_analysis/classical_optimization/CVaR_optimization/00_index.md",
+      "md_01_data_and_run_context": "result_analysis/classical_optimization/CVaR_optimization/01_data_and_run_context.md",
+      "md_02_metrics_schema": "result_analysis/classical_optimization/CVaR_optimization/02_metrics_schema.md",
+      "md_03_overall_summary": "result_analysis/classical_optimization/CVaR_optimization/03_overall_summary.md",
+      "md_04_tail_risk_properties": "result_analysis/classical_optimization/CVaR_optimization/04_tail_risk_properties.md",
+      "md_05_cvar_return_tradeoff": "result_analysis/classical_optimization/CVaR_optimization/05_cvar_return_tradeoff.md",
+      "md_06_topk_portfolios": "result_analysis/classical_optimization/CVaR_optimization/06_topk_portfolios.md",
+      "md_07_tail_portfolios": "result_analysis/classical_optimization/CVaR_optimization/07_tail_portfolios.md",
+      "md_08_weights_analysis": "result_analysis/classical_optimization/CVaR_optimization/08_weights_analysis.md",
+      "md_09_backtesting_and_coherence": "result_analysis/classical_optimization/CVaR_optimization/09_backtesting_and_coherence.md",
+      "md_10_runtime_and_scalability": "result_analysis/classical_optimization/CVaR_optimization/10_runtime_and_scalability.md",
+      "md_11_ieee_access_ready_paragraphs": "result_analysis/classical_optimization/CVaR_optimization/11_ieee_access_ready_paragraphs.md",
+      "md_12_figure_captions": "result_analysis/classical_optimization/CVaR_optimization/12_figure_captions.md"
     }
   },
 
@@ -82,7 +82,7 @@
         "verify_files_exist: results/classical_optimization/cvar_optimal_weights.parquet",
         "verify_files_exist: results/classical_optimization/cvar_return_frontier.parquet",
         "verify_files_exist: results/classical_optimization/cvar_optimization_metrics_schema.json",
-        "ensure_dir: result_analysis/classical_optimization/cvar/figures"
+        "ensure_dir: result_analysis/classical_optimization/cvar_optimization/figures"
       ],
       "fail_fast": true
     },
@@ -173,7 +173,7 @@
           "x": "cvar",
           "y": "expected_return",
           "group_by": "confidence_level",
-          "output_path": "result_analysis/classical_optimization/cvar/figures/02_cvar_frontier/fig_01_cvar_return_frontier.png"
+          "output_path": "result_analysis/classical_optimization/cvar_optimization/figures/02_cvar_frontier/fig_01_cvar_return_frontier.png"
         },
         {
           "id": "fig_02_return_vs_cvar",
@@ -181,7 +181,7 @@
           "source": "metrics_table",
           "x": "cvar",
           "y": "expected_return",
-          "output_path": "result_analysis/classical_optimization/cvar/figures/03_risk_return/fig_02_return_vs_cvar.png"
+          "output_path": "result_analysis/classical_optimization/cvar_optimization/figures/03_risk_return/fig_02_return_vs_cvar.png"
         },
         {
           "id": "fig_03_cvar_distribution",
@@ -189,7 +189,7 @@
           "source": "metrics_table",
           "column": "cvar",
           "bins": 50,
-          "output_path": "result_analysis/classical_optimization/cvar/figures/01_distributions/fig_03_cvar_distribution.png"
+          "output_path": "result_analysis/classical_optimization/cvar_optimization/figures/01_distributions/fig_03_cvar_distribution.png"
         },
         {
           "id": "fig_04_tail_loss_distribution",
@@ -197,7 +197,7 @@
           "source": "metrics_table",
           "column": "worst_case_loss",
           "bins": 50,
-          "output_path": "result_analysis/classical_optimization/cvar/figures/04_tail_behavior/fig_04_tail_loss_distribution.png"
+          "output_path": "result_analysis/classical_optimization/cvar_optimization/figures/04_tail_behavior/fig_04_tail_loss_distribution.png"
         }
       ]
     },
@@ -205,13 +205,13 @@
     "stage_4_write_ieee_access_narratives": {
       "markdown_docs": [
         {
-          "path": "result_analysis/classical_optimization/cvar/11_ieee_access_ready_paragraphs.md",
+          "path": "result_analysis/classical_optimization/CVaR_optimization/11_ieee_access_ready_paragraphs.md",
           "content_blocks": [
-            "CVaR methodology and Rockafellar–Uryasev formulation",
+            "CVaR methodology and Rockafellar-Uryasev formulation",
             "Interpretation of CVaR-return frontier",
             "Tail-risk dominance over variance-based optimization",
             "Backtesting and coherence properties of CVaR",
-            "Positioning relative to Markowitz and Black–Litterman"
+            "Positioning relative to Markowitz and Black-Litterman"
           ]
         }
       ]
@@ -226,13 +226,13 @@
         "cvar_greater_than_var",
         "no_negative_expected_loss_beyond_cvar"
       ],
-      "write_audit_log": "result_analysis/classical_optimization/cvar/audit_log.json"
+      "write_audit_log": "result_analysis/classical_optimization/CVaR_optimization/audit_log.json"
     }
   },
 
   "cursor_implementation_tasks": [
     {
-      "file": "result_analysis/classical_optimization/cvar/report_generation_cvar.py",
+      "file": "result_analysis/classical_optimization/CVaR_optimization/report_generation_cvar_optimization.py",
       "changes": [
         "Load CVaR optimization artifacts.",
         "Generate IEEE Access markdown tables and narratives.",

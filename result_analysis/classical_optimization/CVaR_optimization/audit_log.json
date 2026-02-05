@@ -1,0 +1,22 @@
+{
+  "validation_checks": {
+    "num_portfolios": 100000,
+    "num_metrics": 47,
+    "missing_columns": [],
+    "cvar_greater_than_var": true,
+    "no_negative_expected_loss_beyond_cvar": true,
+    "confidence_levels": [
+      0.95
+    ]
+  },
+  "quality_checks": {
+    "all_markdown_files_exist": true,
+    "all_figure_files_exist": true,
+    "metrics_table_empty": false,
+    "weights_table_empty": true,
+    "weights_sum_to_one": false,
+    "cvar_non_increasing_with_confidence": false,
+    "cvar_greater_than_var": true,
+    "no_negative_expected_loss_beyond_cvar": true
+  }
+}
