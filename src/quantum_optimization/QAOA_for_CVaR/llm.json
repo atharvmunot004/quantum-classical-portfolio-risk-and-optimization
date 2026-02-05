@@ -306,16 +306,16 @@
     },
   
     "outputs": {
-      "qaoa_selected_portfolios": "results/quantum_portfolio/qaoa_selected_portfolios.parquet",
-      "qaoa_samples": "results/quantum_portfolio/qaoa_samples.parquet",
-      "portfolio_weights": "results/quantum_portfolio/qaoa_portfolio_weights.parquet",
-      "portfolio_performance": "results/quantum_portfolio/qaoa_portfolio_performance.parquet",
-      "pareto_front": "results/quantum_portfolio/qaoa_pareto_front.parquet",
-      "metrics_table": "results/quantum_portfolio/qaoa_metrics.parquet",
-      "time_sliced_metrics": "results/quantum_portfolio/qaoa_time_sliced_metrics.parquet",
-      "metrics_schema_json": "results/quantum_portfolio/qaoa_metrics_schema.json",
-      "summary_report": "results/quantum_portfolio/qaoa_result_summary.md",
-      "runtime_profile": "results/quantum_portfolio/qaoa_runtime_profile.json"
+      "qaoa_selected_portfolios": "results/quantum_optimization/qaoa_selected_portfolios.parquet",
+      "qaoa_samples": "results/quantum_optimization/qaoa_samples.parquet",
+      "portfolio_weights": "results/quantum_optimization/qaoa_portfolio_weights.parquet",
+      "portfolio_performance": "results/quantum_optimization/qaoa_portfolio_performance.parquet",
+      "pareto_front": "results/quantum_optimization/qaoa_pareto_front.parquet",
+      "metrics_table": "results/quantum_optimization/qaoa_metrics.parquet",
+      "time_sliced_metrics": "results/quantum_optimization/qaoa_time_sliced_metrics.parquet",
+      "metrics_schema_json": "results/quantum_optimization/qaoa_metrics_schema.json",
+      "summary_report": "results/quantum_optimization/qaoa_result_summary.md",
+      "runtime_profile": "results/quantum_optimization/qaoa_runtime_profile.json"
     },
   
     "cursor_implementation_tasks": [
