@@ -199,7 +199,12 @@ def run_qaoa_optimization(
     # Energy computation function
     def compute_energies(params: np.ndarray) -> Tuple[np.ndarray, Dict[str, int]]:
         """Compute energies for given parameters."""
-        bound = ansatz.bind_parameters(params)
+        # Use assign_parameters for newer Qiskit versions, fallback to bind_parameters
+        try:
+            bound = ansatz.assign_parameters(params)
+        except AttributeError:
+            # Fallback for older Qiskit versions
+            bound = ansatz.bind_parameters(params)
         job = backend.run(bound, shots=shots, seed_simulator=seed)
         result = job.result()
         counts = result.get_counts()

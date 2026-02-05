@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Dict, Optional, Union, List, Tuple
 import warnings
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 from .returns import (
     load_panel_prices,
@@ -22,7 +24,115 @@ from .metrics import evaluate_portfolio_performance
 from .qubo_builder import QUBOBuilder
 from .report_generator import generate_report
 from .terminal_logging import get_logger
-from .gpu_acceleration import is_gpu_available, get_gpu_info
+from .parallel_processing import get_optimal_worker_count
+
+
+def _process_single_optimization(args):
+    """
+    Worker function for parallel processing of a single optimization task.
+    
+    Args:
+        args: Tuple of (asset_universe, date, target_k, return_weight, risk_weight,
+                       diversification_weight, confidence_level, reps, returns_path,
+                       registry_root, estimation_window, shots, maxiter, use_gpu,
+                       use_baseline_portfolios)
+    
+    Returns:
+        Tuple of (result_dict, sample_dicts) or None on error
+    """
+    (asset_universe, date, target_k, return_weight, risk_weight,
+     diversification_weight, confidence_level, reps, returns_path,
+     registry_root, estimation_window, shots, maxiter, use_gpu,
+     use_baseline_portfolios) = args
+    
+    try:
+        # Reload returns in worker process (shared file-based)
+        from .returns import load_panel_prices, compute_daily_returns
+        from .precompute_registry import PrecomputeRegistry
+        from .portfolio_evaluator import PortfolioEvaluator
+        
+        prices = load_panel_prices(returns_path)
+        returns = compute_daily_returns(prices, method='log')
+        
+        # Create local evaluator
+        registry = PrecomputeRegistry(registry_root=registry_root, persist_to_disk=True)
+        evaluator = PortfolioEvaluator(
+            returns=returns,
+            registry=registry,
+            estimation_window=estimation_window,
+            target_k=[target_k],
+            return_weights=[return_weight],
+            risk_weights=[risk_weight],
+            diversification_weights=[diversification_weight],
+            confidence_levels=[confidence_level],
+            reps_grid=[reps],
+            shots=shots,
+            maxiter=maxiter,
+            use_gpu=use_gpu
+        )
+        
+        # Run optimization
+        result = evaluator.optimize_portfolio(
+            asset_set=asset_universe,
+            date=date,
+            return_weight=return_weight,
+            risk_weight=risk_weight,
+            diversification_weight=diversification_weight,
+            target_k=target_k,
+            confidence_level=confidence_level,
+            reps=reps
+        )
+        
+        # Convert solution to weights
+        weights = result.best_solution / result.best_solution.sum() if result.best_solution.sum() > 0 else result.best_solution
+        
+        # Build result dict
+        result_dict = {
+            'date': date,
+            'target_k': target_k,
+            'return_weight': return_weight,
+            'risk_weight': risk_weight,
+            'diversification_weight': diversification_weight,
+            'confidence_level': confidence_level,
+            'reps': reps,
+            'best_energy': result.best_energy,
+            'best_solution': result.best_solution.tolist(),
+            'weights': weights.tolist(),
+            'nfev': result.nfev,
+            'circuit_depth': result.circuit_depth,
+            'circuit_width': result.circuit_width,
+            'shots': result.shots,
+            'total_time_ms': result.total_time_ms
+        }
+        
+        if use_baseline_portfolios:
+            result_dict['asset_set'] = str(asset_universe)
+            result_dict['num_assets'] = len(asset_universe)
+        
+        # Build sample dicts
+        sample_dicts = []
+        for sample_solution, sample_energy in result.samples[:10]:
+            sample_weights = sample_solution / sample_solution.sum() if sample_solution.sum() > 0 else sample_solution
+            sample_dict = {
+                'date': date,
+                'target_k': target_k,
+                'return_weight': return_weight,
+                'risk_weight': risk_weight,
+                'diversification_weight': diversification_weight,
+                'confidence_level': confidence_level,
+                'reps': reps,
+                'energy': sample_energy,
+                'solution': sample_solution.tolist(),
+                'weights': sample_weights.tolist()
+            }
+            if use_baseline_portfolios:
+                sample_dict['asset_set'] = str(asset_universe)
+                sample_dict['num_assets'] = len(asset_universe)
+            sample_dicts.append(sample_dict)
+        
+        return (result_dict, sample_dicts)
+    except Exception as e:
+        return None
 
 
 def run_qaoa_portfolio_optimization(
@@ -63,30 +173,20 @@ def run_qaoa_portfolio_optimization(
     
     logger.section("QAOA Portfolio CVaR Optimization")
     
-    # Check GPU availability
-    gpu_config = config.get('gpu_acceleration', {})
-    gpu_enabled_config = gpu_config.get('enabled', False)
-    gpu_available = is_gpu_available()
-    use_gpu = gpu_enabled_config and gpu_available
+    # Force disable GPU - using CPU only with multi-core parallelization
+    use_gpu = False
+    logger.info("GPU acceleration: DISABLED (using multi-core CPU parallelization)")
     
-    if use_gpu:
-        gpu_info = get_gpu_info()
-        logger.success(f"GPU acceleration: ENABLED (smart mode)")
-        if 'device_name' in gpu_info:
-            logger.info(f"  Device: {gpu_info['device_name']}")
-            if 'memory_total' in gpu_info:
-                mem_gb = gpu_info['memory_total'] / (1024**3)
-                mem_free_gb = gpu_info.get('memory_free', 0) / (1024**3)
-                logger.info(f"  Memory: {mem_gb:.2f} GB total, {mem_free_gb:.2f} GB free")
-        logger.info("  Note: GPU will only be used for large batch operations (>1000 items)")
-        logger.info("  Small matrices (<50x50) will use CPU for better performance")
-    else:
-        if not gpu_enabled_config:
-            logger.warning("GPU acceleration: DISABLED (disabled in config)")
-        elif not gpu_available:
-            logger.warning("GPU acceleration: DISABLED (GPU not available - check CuPy installation)")
-        else:
-            logger.info("GPU acceleration: DISABLED (using CPU)")
+    # Get CPU configuration for parallel processing
+    parallel_config = config.get('parallelization', {})
+    cpu_percent = parallel_config.get('cpu_percent', 0.8)  # Use 80% of cores by default
+    n_jobs = parallel_config.get('n_jobs', None)  # None = auto
+    
+    if n_jobs is None:
+        n_jobs = get_optimal_worker_count(cpu_percent=cpu_percent)
+    
+    total_cores = cpu_count()
+    logger.info(f"CPU parallelization: Using {n_jobs} workers out of {total_cores} cores ({n_jobs/total_cores*100:.1f}%)")
     
     # Extract settings
     inputs = config['inputs']
@@ -231,111 +331,82 @@ def run_qaoa_portfolio_optimization(
         all_results = []
         all_samples = []
         
-        # Create progress bar for overall progress
-        overall_pbar = logger.create_progress_bar(
-            total=total_optimizations,
-            desc="Overall Progress",
-            unit="opt"
-        )
-        
-        opt_count = 0
-        
-        # Process all asset universes and rebalancing dates
-        for asset_set_idx, asset_universe in enumerate(asset_universes):
-            if use_baseline_portfolios:
-                logger.progress(f"Processing asset set {asset_set_idx + 1}/{len(asset_universes)}: {len(asset_universe)} assets")
-            
-            for date_idx, date in enumerate(rebalance_dates):
-                if not use_baseline_portfolios or asset_set_idx == 0:
-                    logger.progress(f"Processing date {date_idx + 1}/{len(rebalance_dates)}: {date.date()}")
-                
+        # Prepare all optimization tasks
+        logger.progress("Preparing optimization tasks...")
+        tasks = []
+        for asset_universe in asset_universes:
+            for date in rebalance_dates:
                 for target_k in target_k_list:
-                    # Skip if target_k doesn't match asset set size (optional filtering)
                     if use_baseline_portfolios and target_k > len(asset_universe):
                         continue
-                    
                     for return_weight in return_weights:
                         for risk_weight in risk_weights:
                             for diversification_weight in diversification_weights:
                                 for confidence_level in confidence_levels:
                                     for reps in reps_grid:
-                                        try:
-                                            result = evaluator.optimize_portfolio(
-                                                asset_set=asset_universe,
-                                                date=date,
-                                                return_weight=return_weight,
-                                                risk_weight=risk_weight,
-                                                diversification_weight=diversification_weight,
-                                                target_k=target_k,
-                                                confidence_level=confidence_level,
-                                                reps=reps
-                                            )
-                                            
-                                            # Convert solution to weights
-                                            weights = result.best_solution / result.best_solution.sum() if result.best_solution.sum() > 0 else result.best_solution
-                                            
-                                            # Store result
-                                            result_dict = {
-                                                'date': date,
-                                                'target_k': target_k,
-                                                'return_weight': return_weight,
-                                                'risk_weight': risk_weight,
-                                                'diversification_weight': diversification_weight,
-                                                'confidence_level': confidence_level,
-                                                'reps': reps,
-                                                'best_energy': result.best_energy,
-                                                'best_solution': result.best_solution.tolist(),
-                                                'weights': weights.tolist(),
-                                                'nfev': result.nfev,
-                                                'circuit_depth': result.circuit_depth,
-                                                'circuit_width': result.circuit_width,
-                                                'shots': result.shots,
-                                                'total_time_ms': result.total_time_ms
-                                            }
-                                            
-                                            # Add asset set info if using baseline portfolios
-                                            if use_baseline_portfolios:
-                                                result_dict['asset_set'] = str(asset_universe)
-                                                result_dict['num_assets'] = len(asset_universe)
-                                            
-                                            all_results.append(result_dict)
-                                            
-                                            # Store samples
-                                            for sample_solution, sample_energy in result.samples[:10]:  # Top 10 samples
-                                                sample_weights = sample_solution / sample_solution.sum() if sample_solution.sum() > 0 else sample_solution
-                                                sample_dict = {
-                                                    'date': date,
-                                                    'target_k': target_k,
-                                                    'return_weight': return_weight,
-                                                    'risk_weight': risk_weight,
-                                                    'diversification_weight': diversification_weight,
-                                                    'confidence_level': confidence_level,
-                                                    'reps': reps,
-                                                    'energy': sample_energy,
-                                                    'solution': sample_solution.tolist(),
-                                                    'weights': sample_weights.tolist()
-                                                }
-                                                
-                                                # Add asset set info if using baseline portfolios
-                                                if use_baseline_portfolios:
-                                                    sample_dict['asset_set'] = str(asset_universe)
-                                                    sample_dict['num_assets'] = len(asset_universe)
-                                                
-                                                all_samples.append(sample_dict)
-                                            
-                                            # Update progress bar
-                                            opt_count += 1
-                                            logger.update_progress_bar(
-                                                overall_pbar,
-                                                n=1,
-                                                desc=f"Date {date_idx + 1}/{len(rebalance_dates)} | Opt {opt_count}/{total_optimizations}"
-                                            )
-                                        
-                                        except Exception as e:
-                                            logger.warning(f"  Error optimizing (k={target_k}, rw={return_weight}, rskw={risk_weight}, divw={diversification_weight}, conf={confidence_level}, reps={reps}): {e}")
-                                            opt_count += 1
-                                            logger.update_progress_bar(overall_pbar, n=1)
-                                            continue
+                                        tasks.append((
+                                            asset_universe, date, target_k, return_weight,
+                                            risk_weight, diversification_weight, confidence_level, reps,
+                                            inputs['panel_price_path'],  # returns_path
+                                            precompute_registry_config.get('registry_root', 'cache/qaoa_cvar_precompute'),
+                                            252,  # estimation_window
+                                            qaoa_settings['execution'].get('shots', 5000),
+                                            qaoa_settings['optimizer'].get('maxiter', 250),
+                                            use_gpu,
+                                            use_baseline_portfolios
+                                        ))
+        
+        logger.info(f"Prepared {len(tasks):,} optimization tasks")
+        
+        # Create progress bar for overall progress
+        overall_pbar = logger.create_progress_bar(
+            total=len(tasks),
+            desc="Overall Progress",
+            unit="opt"
+        )
+        
+        # Process tasks in parallel
+        if n_jobs > 1 and len(tasks) > 1:
+            logger.progress(f"Processing {len(tasks):,} optimizations in parallel using {n_jobs} workers...")
+            try:
+                with Pool(processes=n_jobs) as pool:
+                    results_iter = pool.imap(_process_single_optimization, tasks, chunksize=max(1, len(tasks) // (n_jobs * 4)))
+                    opt_count = 0
+                    for result_data in results_iter:
+                        if result_data is not None:
+                            result_dict, sample_dicts = result_data
+                            all_results.append(result_dict)
+                            all_samples.extend(sample_dicts)
+                        opt_count += 1
+                        logger.update_progress_bar(
+                            overall_pbar,
+                            n=1,
+                            desc=f"Completed {opt_count}/{len(tasks)} optimizations"
+                        )
+            except Exception as e:
+                logger.warning(f"Parallel processing failed: {e}. Falling back to sequential.")
+                # Fallback to sequential
+                opt_count = 0
+                for task in tasks:
+                    result_data = _process_single_optimization(task)
+                    if result_data is not None:
+                        result_dict, sample_dicts = result_data
+                        all_results.append(result_dict)
+                        all_samples.extend(sample_dicts)
+                    opt_count += 1
+                    logger.update_progress_bar(overall_pbar, n=1)
+        else:
+            # Sequential processing
+            logger.progress(f"Processing {len(tasks):,} optimizations sequentially...")
+            opt_count = 0
+            for task in tasks:
+                result_data = _process_single_optimization(task)
+                if result_data is not None:
+                    result_dict, sample_dicts = result_data
+                    all_results.append(result_dict)
+                    all_samples.extend(sample_dicts)
+                opt_count += 1
+                logger.update_progress_bar(overall_pbar, n=1)
         
         logger.close_progress_bar(overall_pbar)
         
