@@ -21,6 +21,9 @@ matplotlib>=3.7.0  # Plotting and visualization
 seaborn>=0.12.0  # Statistical data visualization
 
 # Quantum Risk Assessment dependencies (QAE for VaR/CVaR)
-qiskit>=1.0.0  # Quantum circuit framework
+qiskit>=1.0.0  # Quantum circuit framework (assign_parameters support)
 qiskit-aer>=0.13.0  # Aer simulator for circuit execution
 qiskit-algorithms>=0.3.0  # Iterative Amplitude Estimation
+
+# QAOA Portfolio Optimization dependencies
+tqdm>=4.65.0  # Progress bars for terminal logging and parallel processing
