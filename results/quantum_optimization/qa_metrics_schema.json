@@ -1,0 +1,207 @@
+{
+  "tool": "QA_Multi_Portfolio",
+  "description": "Quantum Annealing Multi-Objective Portfolio Optimization metrics schema",
+  "metrics": {
+    "date": {
+      "dtype": "datetime64[ns]",
+      "nullable": false,
+      "description": "Rebalancing date (index)"
+    },
+    "estimation_window": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Estimation window size in days (252 or 500)"
+    },
+    "return_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight for return objective in QUBO formulation"
+    },
+    "risk_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight for risk (CVaR) objective in QUBO formulation"
+    },
+    "diversification_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight for diversification objective in QUBO formulation"
+    },
+    "best_energy": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Best QUBO energy value found (lower is better)"
+    },
+    "energy_gap": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Energy gap between best and second-best solution"
+    },
+    "pareto_front_size": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Number of unique solutions found (approximate Pareto front size)"
+    },
+    "num_reads": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Number of reads/samples from quantum annealer"
+    },
+    "annealing_time_us": {
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Annealing time in microseconds (quantum hardware specific)"
+    },
+    "chain_break_fraction": {
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Fraction of chain breaks in embedding (D-Wave specific, lower is better)"
+    },
+    "embedding_size": {
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Number of physical qubits used in embedding (D-Wave specific)"
+    },
+    "logical_to_physical_qubit_ratio": {
+      "dtype": "float64",
+      "nullable": true,
+      "description": "Ratio of logical to physical qubits (D-Wave specific, lower overhead is better)"
+    },
+    "total_runtime_ms": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Total runtime for optimization in milliseconds"
+    },
+    "qubo_build_time_ms": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Time to build QUBO matrix in milliseconds"
+    },
+    "annealing_time_ms": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Time for quantum/simulated annealing in milliseconds"
+    }
+  },
+  "portfolio_performance_metrics": {
+    "date": {
+      "dtype": "datetime64[ns]",
+      "nullable": false,
+      "description": "Rebalancing date (index)"
+    },
+    "portfolio_return": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio return for this date"
+    },
+    "return_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight configuration for return objective"
+    },
+    "risk_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight configuration for risk objective"
+    },
+    "diversification_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight configuration for diversification objective"
+    },
+    "estimation_window": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Estimation window size"
+    },
+    "realized_return": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Cumulative realized return (annualized)"
+    },
+    "realized_volatility": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Realized volatility (annualized)"
+    },
+    "realized_cvar": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Realized Conditional Value at Risk (CVaR) at 95% confidence (annualized)"
+    },
+    "max_drawdown": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Maximum drawdown (negative value)"
+    },
+    "sharpe_ratio": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Sharpe ratio (annualized)"
+    }
+  },
+  "portfolio_weights_schema": {
+    "date": {
+      "dtype": "datetime64[ns]",
+      "nullable": false,
+      "description": "Rebalancing date (index)"
+    },
+    "asset": {
+      "dtype": "object",
+      "nullable": false,
+      "description": "Asset ticker symbol"
+    },
+    "weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Portfolio weight for this asset (sums to 1.0 per date/config)"
+    },
+    "return_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight configuration for return objective"
+    },
+    "risk_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight configuration for risk objective"
+    },
+    "diversification_weight": {
+      "dtype": "float64",
+      "nullable": false,
+      "description": "Weight configuration for diversification objective"
+    },
+    "estimation_window": {
+      "dtype": "int64",
+      "nullable": false,
+      "description": "Estimation window size"
+    }
+  },
+  "parquet_files": {
+    "qa_portfolio_metrics.parquet": {
+      "description": "Optimization quality, quantum-specific, and runtime metrics per date/window/weight_config",
+      "primary_key": ["date", "estimation_window", "return_weight", "risk_weight", "diversification_weight"]
+    },
+    "qa_portfolio_performance.parquet": {
+      "description": "Portfolio performance metrics (returns, volatility, CVaR, Sharpe ratio) per date/window/weight_config",
+      "primary_key": ["date", "estimation_window", "return_weight", "risk_weight", "diversification_weight"]
+    },
+    "qa_portfolio_weights.parquet": {
+      "description": "Portfolio weights per asset per date/window/weight_config",
+      "primary_key": ["date", "asset", "estimation_window", "return_weight", "risk_weight", "diversification_weight"]
+    }
+  },
+  "metadata": {
+    "optimization_method": "quantum_annealing",
+    "problem_formulation": "QUBO",
+    "objectives": ["expected_return_maximization", "CVaR_minimization", "diversification_maximization"],
+    "constraints": ["budget_constraint", "cardinality_constraint", "long_only"],
+    "precomputed_portfolios": true,
+    "num_precomputed_portfolios": 100000,
+    "num_top_portfolios_selected": 5000,
+    "estimation_windows": [252, 500],
+    "rebalance_frequency_days": 21,
+    "weight_configurations": 8,
+    "confidence_level": 0.95
+  }
+}

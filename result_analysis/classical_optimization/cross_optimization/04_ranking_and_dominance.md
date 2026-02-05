@@ -185,12 +185,12 @@
 
 ## Pareto Dominance
 
-| tool_name | total_portfolios_sampled | pareto_dominant_count | pareto_dominant_pct |
-| --- | --- | --- | --- |
-| risk_parity_erc | 899 | 225 | 25.027809 |
-| cvar_optimization | 38 | 38 | 100.000000 |
-| black_litterman | 29 | 8 | 27.586207 |
-| markowitz_mean_variance | 34 | 34 | 100.000000 |
+| tool_name | total_portfolios | pareto_dominant_count | pareto_dominated_count | pareto_dominant_pct | pareto_dominated_pct |
+| --- | --- | --- | --- | --- | --- |
+| risk_parity_erc | 9011 | 8876 | 8904 | 98.501831 | 98.812562 |
+| cvar_optimization | 352 | 352 | 0 | 100.000000 | 0.000000 |
+| black_litterman | 327 | 250 | 327 | 76.452599 | 100.000000 |
+| markowitz_mean_variance | 310 | 310 | 310 | 100.000000 | 100.000000 |
 
 ## Interpretation
 

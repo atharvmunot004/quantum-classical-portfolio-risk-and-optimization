@@ -9,7 +9,6 @@
     "inputs": {
       "panel_price_path": "data/processed/panel_price.parquet",
       "precomputed_portfolios_path": "portfolios/portfolios.parquet",
-      "portfolio_weights_path": "portfolios/precomputed_weights.parquet",
       "return_type": "log",
       "loss_definition": "negative_return",
       "confidence_levels": [0.95, 0.99],
@@ -40,20 +39,20 @@
       },
   
       "artifacts": {
-        "daily_returns_full_universe": "cache/qae_precompute/daily_returns_full.parquet",
+        "daily_returns_full_universe": "data/processed/daily_returns_full.parquet",
   
-        "asset_set_index": "cache/qae_precompute/asset_sets.parquet",
-        "portfolio_to_asset_set_map": "cache/qae_precompute/portfolio_asset_set_map.parquet",
+        "asset_set_index": "data/processed/asset_sets.parquet",
+        "portfolio_to_asset_set_map": "data/processed/portfolio_asset_set_map.parquet",
   
-        "distribution_params_by_asset_set": "cache/qae_precompute/distribution_params.parquet",
+        "distribution_params_by_asset_set": "data/processed/distribution_params.parquet",
   
-        "quantum_state_preparation_by_asset_set": "cache/qae_precompute/state_prep_by_asset_set.pkl",
+        "quantum_state_preparation_by_asset_set": "data/processed/state_prep_by_asset_set.pkl",
   
-        "qae_tail_expectation_by_asset_set": "cache/qae_precompute/qae_tail_expectation.parquet",
+        "qae_tail_expectation_by_asset_set": "data/processed/qae_tail_expectation.parquet",
   
-        "var_thresholds_by_asset_set": "cache/qae_precompute/var_thresholds.parquet",
+        "var_thresholds_by_asset_set": "data/processed/var_thresholds.parquet",
   
-        "full_universe_weight_matrix": "cache/qae_precompute/W_full_10xN.npy"
+        "full_universe_weight_matrix": "data/processed/W_full_10xN.npy"
       },
   
       "reuse_rules": {
@@ -207,13 +206,13 @@
     },
   
     "outputs": {
-      "quantum_cvar_store": "results/quantum_portfolio/qae_portfolio_cvar.parquet",
-      "portfolio_loss_matrix": "results/quantum_portfolio/portfolio_loss_matrix.npy",
-      "metrics_table": "results/quantum_portfolio/qae_metrics.parquet",
-      "time_sliced_metrics": "results/quantum_portfolio/qae_time_sliced_metrics.parquet",
-      "metrics_schema_json": "results/quantum_portfolio/qae_metrics_schema.json",
-      "summary_report": "results/quantum_portfolio/qae_result_summary.md",
-      "runtime_profile": "results/quantum_portfolio/qae_runtime_profile.json"
+      "quantum_cvar_store": "results/quantum_optimzation/qae_portfolio_cvar.parquet",
+      "portfolio_loss_matrix": "results/quantum_optimzation/portfolio_loss_matrix.npy",
+      "metrics_table": "results/quantum_optimzation/qae_metrics.parquet",
+      "time_sliced_metrics": "results/quantum_optimzation/qae_time_sliced_metrics.parquet",
+      "metrics_schema_json": "results/quantum_optimzation/qae_metrics_schema.json",
+      "summary_report": "results/quantum_optimzation/qae_result_summary.md",
+      "runtime_profile": "results/quantum_optimzation/qae_runtime_profile.json"
     },
   
     "paper_usage_notes": {

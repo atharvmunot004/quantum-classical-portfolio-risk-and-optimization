@@ -8,13 +8,14 @@
     },
   
     "inputs": {
-      "panel_price_path": "data/preprocessed/panel_price.parquet",
+      "panel_price_path": "data/processed/panel_price.parquet",
       "asset_universe": {
         "mode": "filtered",
         "max_assets": 40,
         "selection_method": "liquidity_and_data_availability",
         "notes": "Asset universe is capped to fit current annealer connectivity constraints."
-      }
+      },
+      "precomputed_portfolios_path": "portfolios/portfolios.parquet"
     },
   
     "data_settings": {
@@ -235,7 +236,7 @@
   
     "outputs": {
       "portfolio_weights_store": {
-        "path": "results/quantum_portfolio/qa_portfolio_weights.parquet",
+        "path": "results/quantum_optimization/qa_portfolio_weights.parquet",
         "format": "parquet",
         "contents": [
           "date",
@@ -248,22 +249,22 @@
       },
   
       "portfolio_performance_store": {
-        "path": "results/quantum_portfolio/qa_portfolio_performance.parquet",
+        "path": "results/quantum_optimization/qa_portfolio_performance.parquet",
         "format": "parquet"
       },
   
       "pareto_front_store": {
-        "path": "results/quantum_portfolio/qa_portfolio_pareto_front.parquet",
+        "path": "results/quantum_optimization/qa_portfolio_pareto_front.parquet",
         "format": "parquet"
       },
   
       "metrics_table": {
-        "path": "results/quantum_portfolio/qa_portfolio_metrics.parquet",
+        "path": "results/quantum_optimization/qa_portfolio_metrics.parquet",
         "format": "parquet"
       },
   
       "report": {
-        "path": "results/quantum_portfolio/qa_portfolio_report.md",
+        "path": "results/quantum_optimization/qa_portfolio_report.md",
         "include_sections": [
           "problem_formulation",
           "qubo_construction",

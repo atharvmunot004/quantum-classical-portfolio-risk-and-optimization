@@ -1,0 +1,222 @@
+{
+  "tool": "QAE_Portfolio_CVaR",
+  "description": "Quantum Amplitude Estimation (QAE) for portfolio-level CVaR estimation using precomputed quantum artifacts",
+  "parquet_schemas": {
+    "qae_portfolio_cvar.parquet": {
+      "description": "QAE-based CVaR estimates for all portfolios at multiple confidence levels",
+      "index": "portfolio_id",
+      "columns": [
+        {
+          "name": "portfolio_id",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Portfolio identifier (index)"
+        },
+        {
+          "name": "var",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Value at Risk (VaR) threshold estimated using QAE"
+        },
+        {
+          "name": "cvar",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Conditional Value at Risk (CVaR) estimated using QAE tail expectation"
+        },
+        {
+          "name": "tail_expectation",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Tail expectation E[(L - VaR)^+] computed using QAE"
+        },
+        {
+          "name": "qae_point_estimate",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "QAE point estimate for tail expectation"
+        },
+        {
+          "name": "qae_ci_width",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Width of QAE confidence interval (upper - lower)"
+        },
+        {
+          "name": "num_grover_iterations",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Number of Grover iterations used in QAE algorithm"
+        },
+        {
+          "name": "circuit_depth",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Depth of quantum circuit used for QAE"
+        },
+        {
+          "name": "circuit_width",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Width (number of qubits) of quantum circuit"
+        },
+        {
+          "name": "num_shots",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Number of measurement shots used in QAE"
+        },
+        {
+          "name": "confidence_level",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Confidence level for VaR/CVaR estimation (e.g., 0.95, 0.99)"
+        }
+      ]
+    },
+    "qae_metrics.parquet": {
+      "description": "Comprehensive QAE metrics table (same structure as qae_portfolio_cvar.parquet)",
+      "index": "portfolio_id",
+      "columns": [
+        {
+          "name": "portfolio_id",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Portfolio identifier (index)"
+        },
+        {
+          "name": "var",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Value at Risk (VaR) threshold"
+        },
+        {
+          "name": "cvar",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Conditional Value at Risk (CVaR)"
+        },
+        {
+          "name": "tail_expectation",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Tail expectation E[(L - VaR)^+]"
+        },
+        {
+          "name": "qae_point_estimate",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "QAE point estimate"
+        },
+        {
+          "name": "qae_ci_width",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "QAE confidence interval width"
+        },
+        {
+          "name": "num_grover_iterations",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Number of Grover iterations"
+        },
+        {
+          "name": "circuit_depth",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Quantum circuit depth"
+        },
+        {
+          "name": "circuit_width",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Quantum circuit width (qubits)"
+        },
+        {
+          "name": "num_shots",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Number of measurement shots"
+        },
+        {
+          "name": "confidence_level",
+          "dtype": "float64",
+          "nullable": false,
+          "description": "Confidence level (0.95 or 0.99)"
+        }
+      ]
+    },
+    "portfolio_asset_set_map.parquet": {
+      "description": "Mapping from portfolios to their asset sets for precomputation reuse",
+      "columns": [
+        {
+          "name": "portfolio_id",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Portfolio identifier"
+        },
+        {
+          "name": "asset_set",
+          "dtype": "object",
+          "nullable": false,
+          "description": "List of assets in this portfolio (as tuple/list)"
+        },
+        {
+          "name": "asset_set_id",
+          "dtype": "int64",
+          "nullable": false,
+          "description": "Unique identifier for the asset set (for precomputation reuse)"
+        }
+      ]
+    }
+  },
+  "metrics_categories": {
+    "risk_metrics": {
+      "var": "Value at Risk threshold",
+      "cvar": "Conditional Value at Risk (Expected Shortfall)",
+      "tail_expectation": "Tail expectation beyond VaR threshold"
+    },
+    "quantum_specific_metrics": {
+      "qae_point_estimate": "QAE algorithm point estimate for tail expectation",
+      "qae_ci_width": "Confidence interval width from QAE",
+      "num_grover_iterations": "Number of Grover operator applications in QAE",
+      "circuit_depth": "Quantum circuit depth (number of layers)",
+      "circuit_width": "Quantum circuit width (number of qubits)",
+      "num_shots": "Number of quantum measurements"
+    },
+    "configuration": {
+      "confidence_level": "Confidence level for risk estimation (0.95 or 0.99)",
+      "portfolio_id": "Unique portfolio identifier"
+    }
+  },
+  "computation_strategy": {
+    "precomputation": {
+      "enabled": true,
+      "description": "Quantum artifacts precomputed per unique asset set, then reused across portfolios",
+      "unique_asset_sets": "1,013 unique asset sets from 100,000 portfolios",
+      "reuse_ratio": "~99x reuse (100K portfolios / 1,013 asset sets)"
+    },
+    "qae_algorithm": {
+      "type": "iterative_amplitude_estimation",
+      "epsilon_target": 0.01,
+      "confidence_alpha": 0.05,
+      "backend": "aer_simulator"
+    },
+    "distribution_model": {
+      "type": "multivariate_normal",
+      "estimation_window": 252,
+      "shrinkage": "ledoit_wolf"
+    }
+  },
+  "metadata": {
+    "num_portfolios": 100000,
+    "num_confidence_levels": 2,
+    "total_evaluations": 200000,
+    "confidence_levels": [0.95, 0.99],
+    "num_state_qubits": 6,
+    "shots": 2000,
+    "precomputation_enabled": true,
+    "gpu_acceleration": true,
+    "parallelization": true
+  }
+}
