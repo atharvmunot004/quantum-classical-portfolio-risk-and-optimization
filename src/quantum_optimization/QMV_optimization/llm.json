@@ -260,14 +260,14 @@
     },
   
     "outputs": {
-      "solutions": "results/quantum_portfolio/qmv_solutions.parquet",
-      "portfolio_weights": "results/quantum_portfolio/qmv_portfolio_weights.parquet",
-      "portfolio_daily_returns_matrix": "results/quantum_portfolio/qmv_portfolio_daily_returns.npy",
-      "metrics_table": "results/quantum_portfolio/qmv_metrics.parquet",
-      "time_sliced_metrics": "results/quantum_portfolio/qmv_time_sliced_metrics.parquet",
-      "metrics_schema_json": "results/quantum_portfolio/qmv_metrics_schema.json",
-      "summary_report": "results/quantum_portfolio/qmv_result_summary.md",
-      "runtime_profile": "results/quantum_portfolio/qmv_runtime_profile.json"
+      "solutions": "results/quantum_optimization/qmv_solutions.parquet",
+      "portfolio_weights": "results/quantum_optimization/qmv_portfolio_weights.parquet",
+      "portfolio_daily_returns_matrix": "results/quantum_optimization/qmv_portfolio_daily_returns.npy",
+      "metrics_table": "results/quantum_optimization/qmv_metrics.parquet",
+      "time_sliced_metrics": "results/quantum_optimization/qmv_time_sliced_metrics.parquet",
+      "metrics_schema_json": "results/quantum_optimization/qmv_metrics_schema.json",
+      "summary_report": "results/quantum_optimization/qmv_result_summary.md",
+      "runtime_profile": "results/quantum_optimization/qmv_runtime_profile.json"
     },
   
     "cursor_implementation_tasks": [

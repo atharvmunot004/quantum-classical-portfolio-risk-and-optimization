@@ -138,3 +138,78 @@ def compute_covariance_matrix(
         cov = window_returns.cov()
     
     return cov
+
+
+def load_baseline_portfolios(baseline_portfolios_path: Union[str, Path]) -> pd.DataFrame:
+    """
+    Load baseline portfolios from parquet or CSV file.
+    
+    Args:
+        baseline_portfolios_path: Path to baseline portfolios file
+        
+    Returns:
+        DataFrame with portfolio weights (portfolio_id x assets)
+    """
+    original_path = str(baseline_portfolios_path)
+    baseline_portfolios_path = Path(baseline_portfolios_path)
+    
+    # Handle relative paths
+    if baseline_portfolios_path.is_absolute() and baseline_portfolios_path.exists():
+        pass
+    elif baseline_portfolios_path.exists():
+        pass
+    else:
+        current_file = Path(__file__)
+        project_root = current_file.parent.parent.parent.parent
+        baseline_portfolios_path = project_root / original_path
+        
+        if not baseline_portfolios_path.exists():
+            attempted_paths = [
+                str(Path(original_path).resolve()),
+                str(baseline_portfolios_path)
+            ]
+            raise FileNotFoundError(
+                f"Baseline portfolios file not found. Attempted paths:\n"
+                f"  1. {attempted_paths[0]}\n"
+                f"  2. {attempted_paths[1]}\n"
+                f"Please check that the file exists or update the path in llm.json"
+            )
+    
+    if baseline_portfolios_path.suffix == '.parquet':
+        portfolios = pd.read_parquet(baseline_portfolios_path)
+    elif baseline_portfolios_path.suffix == '.csv':
+        portfolios = pd.read_csv(baseline_portfolios_path, index_col=0)
+    else:
+        raise ValueError(f"Unsupported file format: {baseline_portfolios_path.suffix}")
+    
+    # Ensure index is named portfolio_id if not already
+    if portfolios.index.name is None:
+        portfolios.index.name = 'portfolio_id'
+    
+    return portfolios
+
+
+def extract_asset_sets_from_portfolios(portfolios: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract unique asset sets from portfolios.
+    
+    Args:
+        portfolios: DataFrame with portfolio weights (portfolio_id x assets)
+        
+    Returns:
+        DataFrame mapping portfolio_id to asset_set (tuple of asset names)
+    """
+    asset_sets = []
+    
+    for portfolio_id, row in portfolios.iterrows():
+        # Get assets with non-zero weights
+        active_assets = row[row > 1e-10].index.tolist()
+        asset_set = tuple(sorted(active_assets))
+        asset_sets.append({
+            'portfolio_id': portfolio_id,
+            'asset_set': asset_set,
+            'num_assets': len(active_assets)
+        })
+    
+    asset_set_df = pd.DataFrame(asset_sets)
+    return asset_set_df
