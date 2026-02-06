@@ -1,0 +1,161 @@
+{
+    "task": "quantum_optimization_q_annealing_result_analysis_generator",
+  
+    "intent": {
+      "problem": "Raw quantum optimization outputs are not directly suitable for IEEE Access publication.",
+      "goal": "Automatically generate IEEE Access-grade summary tables (Markdown) and publication-ready figures from tool outputs using the provided llm.json configuration and schema_metrics.json definitions."
+    },
+  
+    "inputs": {
+  
+      "data_sources": {
+        "metrics_table": "results/quantum_optimization/q_annealing_portfolio_metrics.parquet",
+        "performance_table": "results/quantum_optimization/q_annealing_portfolio_performance.parquet",
+        "weights_table": "results/quantum_optimization/q_annealing_portfolio_weights.parquet",
+        "pareto_table": "results/quantum_optimization/q_annealing_portfolio_pareto_front.parquet"
+      }
+    },
+  
+    "output_settings": {
+      "base_output_dir": "result_analysis/quantum_optimization/Q_annealing",
+      "tables_format": "markdown",
+      "figures_subdir": "result_analysis/quantum_optimization/Q_annealing/figures",
+      "figure_format": "png",
+      "dpi": 300,
+      "style": "ieee_access"
+    },
+  
+    "summary_tables": {
+      "enabled": true,
+  
+      "tables": [
+        {
+          "name": "optimization_quality_summary",
+          "source": "metrics_table",
+          "group_by": ["estimation_window"],
+          "metrics": [
+            "best_energy",
+            "energy_gap",
+            "pareto_front_size"
+          ],
+          "aggregation": ["mean", "std"],
+          "output_file": "summary_tables.md",
+          "caption": "Optimization quality statistics for quantum annealing-based portfolio construction."
+        },
+  
+        {
+          "name": "out_of_sample_performance",
+          "source": "performance_table",
+          "group_by": ["estimation_window"],
+          "metrics": [
+            "realized_return",
+            "realized_volatility",
+            "realized_cvar",
+            "sharpe_ratio",
+            "max_drawdown"
+          ],
+          "aggregation": ["mean", "std"],
+          "output_file": "performance_tables.md",
+          "caption": "Out-of-sample portfolio performance across rolling estimation windows."
+        },
+  
+        {
+          "name": "quantum_diagnostics",
+          "source": "metrics_table",
+          "group_by": ["estimation_window"],
+          "metrics": [
+            "chain_break_fraction",
+            "embedding_size",
+            "logical_to_physical_qubit_ratio"
+          ],
+          "aggregation": ["mean", "p95"],
+          "output_file": "quantum_diagnostics.md",
+          "caption": "Quantum hardware diagnostics and embedding overhead statistics."
+        },
+  
+        {
+          "name": "runtime_profile",
+          "source": "metrics_table",
+          "group_by": ["estimation_window"],
+          "metrics": [
+            "total_runtime_ms",
+            "qubo_build_time_ms",
+            "annealing_time_ms"
+          ],
+          "aggregation": ["mean", "p95"],
+          "output_file": "runtime_analysis.md",
+          "caption": "Runtime decomposition of quantum annealing-based optimization pipeline."
+        }
+      ]
+    },
+  
+    "figures": {
+      "enabled": true,
+  
+      "plots": [
+        {
+          "name": "pareto_front",
+          "type": "scatter",
+          "source": "pareto_table",
+          "x": "realized_cvar",
+          "y": "realized_return",
+          "color_by": "estimation_window",
+          "output_file": "figures/pareto_front.png",
+          "caption": "Approximate Pareto front illustrating return-CVaR trade-offs."
+        },
+  
+        {
+          "name": "return_vs_cvar",
+          "type": "scatter",
+          "source": "performance_table",
+          "x": "realized_cvar",
+          "y": "realized_return",
+          "group_by": "estimation_window",
+          "output_file": "figures/return_vs_cvar.png",
+          "caption": "Risk-return characteristics of quantum-optimized portfolios."
+        },
+  
+        {
+          "name": "sharpe_comparison",
+          "type": "boxplot",
+          "source": "performance_table",
+          "y": "sharpe_ratio",
+          "group_by": "estimation_window",
+          "output_file": "figures/sharpe_comparison.png",
+          "caption": "Distribution of Sharpe ratios across rolling windows."
+        },
+  
+        {
+          "name": "chain_breaks",
+          "type": "histogram",
+          "source": "metrics_table",
+          "x": "chain_break_fraction",
+          "output_file": "figures/chain_breaks.png",
+          "caption": "Distribution of chain-break fractions in quantum embeddings."
+        },
+  
+        {
+          "name": "runtime_breakdown",
+          "type": "stacked_bar",
+          "source": "metrics_table",
+          "x": "estimation_window",
+          "y": [
+            "qubo_build_time_ms",
+            "annealing_time_ms"
+          ],
+          "output_file": "figures/runtime_breakdown.png",
+          "caption": "Runtime breakdown of QUBO construction and annealing phases."
+        }
+      ]
+    },
+  
+    "paper_ready_checks": {
+      "enforce_caption_style": true,
+      "rounding": {
+        "decimals": 4
+      },
+      "drop_nan_rows": true,
+      "sort_tables_by": "estimation_window"
+    }
+  }
+  

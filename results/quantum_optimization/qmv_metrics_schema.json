@@ -1,0 +1,64 @@
+{
+  "tool": "QMV_Portfolio_Optimization",
+  "description": "Quantum Mean-Variance (QMV) portfolio optimization via QUBO formulation with discretized weights; metrics and solution schemas for parquet outputs.",
+  "parquet_schemas": {
+    "qmv_metrics.parquet": {
+      "description": "Portfolio-level performance metrics for all evaluated portfolios (100K), with optimization metadata.",
+      "row_count_note": "One row per portfolio (100,000 rows when run on full baseline).",
+      "columns": [
+        {"name": "realized_return", "dtype": "float64", "nullable": false, "description": "Annualized realized return over evaluation period"},
+        {"name": "realized_volatility", "dtype": "float64", "nullable": false, "description": "Annualized realized volatility (std of daily returns × √252)"},
+        {"name": "sharpe_ratio", "dtype": "float64", "nullable": false, "description": "Annualized Sharpe ratio (excess return / volatility)"},
+        {"name": "max_drawdown", "dtype": "float64", "nullable": false, "description": "Maximum drawdown (minimum of (cumulative return - running max) / running max)"},
+        {"name": "turnover", "dtype": "float64", "nullable": false, "description": "Portfolio turnover (single-period: typically 0; multi-period rebalancing would populate)"},
+        {"name": "portfolio_id", "dtype": "float64", "nullable": true, "description": "Portfolio identifier from baseline portfolios (index or row id)"},
+        {"name": "asset_set", "dtype": "object", "nullable": true, "description": "String representation of asset set tuple used for this portfolio"},
+        {"name": "lambda_risk", "dtype": "float64", "nullable": true, "description": "Risk aversion parameter (λ) used in mean-variance objective for this solution"},
+        {"name": "energy", "dtype": "float64", "nullable": true, "description": "QUBO energy of the selected solution (lower is better)"},
+        {"name": "runtime_ms", "dtype": "float64", "nullable": true, "description": "Optimization runtime in milliseconds for the solution used"}
+      ]
+    },
+    "qmv_solutions.parquet": {
+      "description": "Optimization solutions per unique asset set and lambda_risk (one row per asset_set × lambda_risk).",
+      "columns": [
+        {"name": "asset_set", "dtype": "object", "nullable": false, "description": "String representation of asset set (tuple of tickers)"},
+        {"name": "date", "dtype": "datetime64[ns]", "nullable": false, "description": "Rebalancing/optimization date"},
+        {"name": "lambda_risk", "dtype": "float64", "nullable": false, "description": "Risk aversion parameter in mean-variance objective"},
+        {"name": "weights", "dtype": "object", "nullable": false, "description": "Optimized portfolio weights (array/list, same order as asset_set)"},
+        {"name": "solution", "dtype": "object", "nullable": true, "description": "Raw solution (e.g. bitstring or spin assignment) from solver"},
+        {"name": "energy", "dtype": "float64", "nullable": false, "description": "QUBO energy of the solution"},
+        {"name": "runtime_ms", "dtype": "float64", "nullable": false, "description": "Solve runtime in milliseconds"}
+      ]
+    },
+    "qmv_portfolio_weights.parquet": {
+      "description": "Portfolio weights in long format (one row per date × lambda_risk × asset).",
+      "columns": [
+        {"name": "date", "dtype": "datetime64[ns]", "nullable": false, "description": "Rebalancing date"},
+        {"name": "lambda_risk", "dtype": "float64", "nullable": false, "description": "Risk aversion parameter"},
+        {"name": "asset", "dtype": "object", "nullable": false, "description": "Asset ticker symbol"},
+        {"name": "weight", "dtype": "float64", "nullable": false, "description": "Portfolio weight for this asset (sums to 1.0 per date/lambda)"}
+      ]
+    }
+  },
+  "metrics_categories": {
+    "portfolio_performance": {
+      "realized_return": "Annualized realized return",
+      "realized_volatility": "Annualized realized volatility",
+      "sharpe_ratio": "Sharpe ratio (annualized)",
+      "max_drawdown": "Maximum drawdown",
+      "turnover": "Turnover"
+    },
+    "optimization_metadata": {
+      "portfolio_id": "Portfolio identifier",
+      "asset_set": "Asset set (tickers) for this portfolio",
+      "lambda_risk": "Risk aversion used for solution",
+      "energy": "QUBO energy of solution",
+      "runtime_ms": "Solve time (ms)"
+    }
+  },
+  "metadata": {
+    "optimization_method": "QUBO mean-variance (simulated/quantum annealing)",
+    "weight_encoding": "binary_discretized_weights",
+    "outputs_location": "results/quantum_optimization/"
+  }
+}

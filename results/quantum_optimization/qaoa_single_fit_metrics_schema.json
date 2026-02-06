@@ -1,0 +1,87 @@
+{
+  "tool": "QAOA_Single_Fit_CVaR",
+  "description": "QAOA single-fit protocol for CVaR portfolio optimization; one QAOA run per unique asset set, then backtest on test period. Schema for all resulting parquet outputs.",
+  "parquet_schemas": {
+    "qaoa_single_fit_performance_test.parquet": {
+      "description": "Out-of-sample performance metrics per (asset_set, target_k, weight_config, reps) on test period.",
+      "columns": [
+        {"name": "realized_return", "dtype": "float64", "nullable": false, "description": "Realized return over test period (annualized)"},
+        {"name": "realized_volatility", "dtype": "float64", "nullable": false, "description": "Realized volatility over test period (annualized)"},
+        {"name": "realized_cvar", "dtype": "float64", "nullable": false, "description": "Realized Conditional Value at Risk (CVaR) on test period"},
+        {"name": "max_drawdown", "dtype": "float64", "nullable": false, "description": "Maximum drawdown over test period"},
+        {"name": "sharpe_ratio", "dtype": "float64", "nullable": false, "description": "Sharpe ratio over test period (annualized)"},
+        {"name": "asset_set", "dtype": "object", "nullable": false, "description": "String representation of asset set (tuple of tickers)"},
+        {"name": "target_k", "dtype": "int64", "nullable": false, "description": "Cardinality constraint (number of assets to hold)"},
+        {"name": "return_weight", "dtype": "float64", "nullable": false, "description": "Weight for return in multi-objective QAOA"},
+        {"name": "risk_weight", "dtype": "float64", "nullable": false, "description": "Weight for risk (CVaR) in multi-objective QAOA"},
+        {"name": "reps", "dtype": "int64", "nullable": false, "description": "QAOA circuit depth (number of mixer/cost layers)"}
+      ]
+    },
+    "qaoa_single_fit_selected_portfolios.parquet": {
+      "description": "Selected QAOA solutions (best solution per asset_set and config); optimization and circuit metadata.",
+      "columns": [
+        {"name": "asset_set", "dtype": "object", "nullable": false, "description": "Asset set (tickers) for this portfolio"},
+        {"name": "num_assets", "dtype": "int64", "nullable": false, "description": "Number of assets in asset set"},
+        {"name": "target_k", "dtype": "int64", "nullable": false, "description": "Cardinality (number of assets to hold)"},
+        {"name": "return_weight", "dtype": "float64", "nullable": false, "description": "Return objective weight"},
+        {"name": "risk_weight", "dtype": "float64", "nullable": false, "description": "Risk (CVaR) objective weight"},
+        {"name": "diversification_weight", "dtype": "float64", "nullable": false, "description": "Diversification objective weight"},
+        {"name": "confidence_level", "dtype": "float64", "nullable": false, "description": "Confidence level for CVaR (e.g. 0.95, 0.99)"},
+        {"name": "reps", "dtype": "int64", "nullable": false, "description": "QAOA layers (reps)"},
+        {"name": "best_energy", "dtype": "float64", "nullable": false, "description": "Best cost Hamiltonian energy found"},
+        {"name": "best_solution", "dtype": "object", "nullable": false, "description": "Best solution (e.g. bitstring or list)"},
+        {"name": "weights", "dtype": "object", "nullable": false, "description": "Decoded portfolio weights from best_solution"},
+        {"name": "nfev", "dtype": "int64", "nullable": false, "description": "Number of function evaluations in classical optimizer"},
+        {"name": "circuit_depth", "dtype": "int64", "nullable": false, "description": "Quantum circuit depth"},
+        {"name": "circuit_width", "dtype": "int64", "nullable": false, "description": "Number of qubits (circuit width)"},
+        {"name": "shots", "dtype": "int64", "nullable": false, "description": "Number of measurement shots per evaluation"},
+        {"name": "total_time_ms", "dtype": "float64", "nullable": false, "description": "Total QAOA optimization time in milliseconds"}
+      ]
+    },
+    "qaoa_single_fit_samples.parquet": {
+      "description": "Subset of selected portfolios (samples) for inspection; same structure as selected_portfolios subset.",
+      "columns": [
+        {"name": "asset_set", "dtype": "object", "nullable": false, "description": "Asset set (tickers)"},
+        {"name": "target_k", "dtype": "int64", "nullable": false, "description": "Cardinality constraint"},
+        {"name": "return_weight", "dtype": "float64", "nullable": false, "description": "Return objective weight"},
+        {"name": "risk_weight", "dtype": "float64", "nullable": false, "description": "Risk objective weight"},
+        {"name": "best_energy", "dtype": "float64", "nullable": false, "description": "Best cost energy"},
+        {"name": "best_solution", "dtype": "object", "nullable": false, "description": "Best solution (bitstring/list)"},
+        {"name": "weights", "dtype": "object", "nullable": false, "description": "Decoded portfolio weights"}
+      ]
+    }
+  },
+  "metrics_categories": {
+    "portfolio_performance": {
+      "realized_return": "Realized return (test period)",
+      "realized_volatility": "Realized volatility (test period)",
+      "realized_cvar": "Realized CVaR (test period)",
+      "max_drawdown": "Maximum drawdown",
+      "sharpe_ratio": "Sharpe ratio"
+    },
+    "optimization_config": {
+      "asset_set": "Asset set",
+      "target_k": "Cardinality",
+      "return_weight": "Return weight",
+      "risk_weight": "Risk weight",
+      "diversification_weight": "Diversification weight",
+      "confidence_level": "CVaR confidence level",
+      "reps": "QAOA layers"
+    },
+    "quantum_specific": {
+      "best_energy": "Best cost energy",
+      "best_solution": "Best solution",
+      "weights": "Decoded weights",
+      "nfev": "Classical optimizer evaluations",
+      "circuit_depth": "Circuit depth",
+      "circuit_width": "Circuit width (qubits)",
+      "shots": "Measurement shots",
+      "total_time_ms": "Total optimization time (ms)"
+    }
+  },
+  "metadata": {
+    "optimization_method": "QAOA (single-fit per unique asset set)",
+    "problem": "CVaR portfolio optimization with cardinality",
+    "outputs_location": "results/quantum_optimization/"
+  }
+}
