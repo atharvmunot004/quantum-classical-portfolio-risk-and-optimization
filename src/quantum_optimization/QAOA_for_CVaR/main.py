@@ -3,14 +3,15 @@ Main execution script for QAOA Portfolio CVaR Optimization.
 
 Orchestrates the entire optimization pipeline with precomputation and reuse.
 """
-import pandas as pd
-import numpy as np
+import ast
 import json
-from pathlib import Path
-from typing import Dict, Optional, Union, List, Tuple
 import warnings
 from multiprocessing import Pool, cpu_count
-from functools import partial
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import pandas as pd
 
 from .returns import (
     load_panel_prices,
@@ -177,9 +178,9 @@ def run_qaoa_portfolio_optimization(
     use_gpu = False
     logger.info("GPU acceleration: DISABLED (using multi-core CPU parallelization)")
     
-    # Get CPU configuration for parallel processing
+    # Get CPU configuration for parallel processing (conservative to limit memory)
     parallel_config = config.get('parallelization', {})
-    cpu_percent = parallel_config.get('cpu_percent', 0.8)  # Use 80% of cores by default
+    cpu_percent = float(parallel_config.get('cpu_percent', 0.5))  # Default 50% of cores
     n_jobs_raw = parallel_config.get('n_jobs', None)  # None = auto
     
     # Convert n_jobs to int if provided, otherwise use None for auto
@@ -194,9 +195,7 @@ def run_qaoa_portfolio_optimization(
     if n_jobs is None:
         n_jobs = get_optimal_worker_count(cpu_percent=cpu_percent)
     else:
-        # Ensure n_jobs is within valid range
         n_jobs = get_optimal_worker_count(max_workers=n_jobs)
-    
     total_cores = cpu_count()
     logger.info(f"CPU parallelization: Using {n_jobs} workers out of {total_cores} cores ({n_jobs/total_cores*100:.1f}%)")
     
@@ -334,14 +333,19 @@ def run_qaoa_portfolio_optimization(
             len(reps_grid)
         )
     logger.info(f"Total optimizations to perform: {total_optimizations:,}")
+
+    # Initialize outputs so save/report always have defined DataFrames
+    results_df = pd.DataFrame()
+    samples_df = pd.DataFrame()
+    performance_df = pd.DataFrame()
     
     # Stage A & B: Precompute and optimize
     if execution_plan.get('stage_A_precompute_per_unique_asset_set_and_date', True) and \
        execution_plan.get('stage_B_qaoa_optimize_and_sample_candidates', True):
         logger.section("Stage A & B: Precomputation and QAOA Optimization")
         
-        all_results = []
-        all_samples = []
+        all_results: List[Dict] = []
+        all_samples: List[Dict] = []
         
         # Prepare all optimization tasks
         logger.progress("Preparing optimization tasks...")
@@ -424,20 +428,10 @@ def run_qaoa_portfolio_optimization(
         
         results_df = pd.DataFrame(all_results)
         samples_df = pd.DataFrame(all_samples)
-        
-        logger.success(f"Optimization complete!")
-        logger.info(f"  Total optimizations: {len(results_df):,}")
-        logger.info(f"  Total samples: {len(samples_df):,}")
-        
-        results_df = pd.DataFrame(all_results)
-        samples_df = pd.DataFrame(all_samples)
-        
-        print(f"\nOptimization complete!")
-        print(f"  Total optimizations: {len(results_df)}")
-        print(f"  Total samples: {len(samples_df)}")
+        logger.success(f"Optimization complete! {len(results_df):,} results, {len(samples_df):,} samples")
     
-    # Stage C: Batch evaluation
-    if execution_plan.get('stage_C_batch_evaluate_candidates_and_select', True) and 'results_df' in locals():
+    # Stage C: Batch evaluation (compute performance metrics per portfolio)
+    if execution_plan.get('stage_C_batch_evaluate_candidates_and_select', True) and not results_df.empty:
         logger.section("Stage C: Batch Evaluation")
         
         performance_results = []
@@ -448,40 +442,40 @@ def run_qaoa_portfolio_optimization(
             unit="portfolio"
         )
         
+        # Resolve asset names per row (each row can have different asset set when using baseline portfolios)
+        default_assets = list(asset_universes[0]) if asset_universes else []
         for idx, row in results_df.iterrows():
             try:
                 date = row['date']
-                
-                # Get solution and convert to weights
+                # Asset set for this row (from optimization)
+                if use_baseline_portfolios and 'asset_set' in row and row.get('asset_set'):
+                    try:
+                        asset_names = list(ast.literal_eval(row['asset_set']))
+                    except (ValueError, SyntaxError):
+                        asset_names = default_assets
+                else:
+                    asset_names = default_assets
+                if not asset_names:
+                    continue
+
                 solution_list = row.get('best_solution', None)
                 if solution_list is None:
                     continue
-                
-                # Handle different storage formats
                 if isinstance(solution_list, str):
-                    import ast
                     try:
                         solution_list = ast.literal_eval(solution_list)
-                    except:
+                    except (ValueError, SyntaxError):
                         continue
-                elif hasattr(solution_list, '__len__') and not isinstance(solution_list, str):
-                    pass  # Already a list/array
-                else:
-                    continue  # Skip if not a valid sequence
-                
-                solution = np.array(solution_list, dtype=float)
-                if solution.ndim != 1 or len(solution) != len(asset_universe):
+                elif not hasattr(solution_list, '__len__') or isinstance(solution_list, str):
                     continue
-                
-                # Convert to weights (equal weight on selected assets)
-                if solution.sum() > 0:
-                    weights = solution / solution.sum()
-                else:
-                    continue  # Skip if no assets selected
-                
-                asset_names = list(asset_universe)
-            except Exception as e:
-                continue  # Skip this row if there's any error
+                solution = np.array(solution_list, dtype=float)
+                if solution.ndim != 1 or len(solution) != len(asset_names):
+                    continue
+                if solution.sum() <= 0:
+                    continue
+                weights = solution / solution.sum()
+            except Exception:
+                continue
             
             # Get out-of-sample returns (next period)
             try:
@@ -529,51 +523,41 @@ def run_qaoa_portfolio_optimization(
     logger.section("Saving Results")
     output_base = Path(outputs['qaoa_selected_portfolios']).parent
     output_base.mkdir(parents=True, exist_ok=True)
-    
-    if 'results_df' in locals() and not results_df.empty:
+
+    if not results_df.empty:
         results_path = output_base / Path(outputs['qaoa_selected_portfolios']).name
         results_df.to_parquet(results_path)
         logger.success(f"Saved selected portfolios: {results_path}")
-    
-    if 'samples_df' in locals() and not samples_df.empty:
+    if not samples_df.empty:
         samples_path = output_base / Path(outputs['qaoa_samples']).name
         samples_df.to_parquet(samples_path)
         logger.success(f"Saved samples: {samples_path}")
-    
-    if 'performance_df' in locals() and not performance_df.empty:
+    if not performance_df.empty:
         perf_path = output_base / Path(outputs['portfolio_performance']).name
         performance_df.to_parquet(perf_path)
         logger.success(f"Saved performance: {perf_path}")
-    
-    # Generate and save report
+        metrics_name = Path(outputs.get('metrics_table', 'qaoa_metrics.parquet')).name
+        if metrics_name != Path(outputs['portfolio_performance']).name:
+            performance_df.to_parquet(output_base / metrics_name)
+            logger.info(f"Saved metrics table: {output_base / metrics_name}")
+
     report_path = output_base / Path(outputs.get('summary_report', 'qaoa_result_summary.md')).name
     logger.progress("Generating report...")
-    report_content = generate_report(
-        {
-            'results': results_df if 'results_df' in locals() else pd.DataFrame(),
-            'samples': samples_df if 'samples_df' in locals() else pd.DataFrame(),
-            'performance': performance_df if 'performance_df' in locals() else pd.DataFrame()
-        },
+    generate_report(
+        {'results': results_df, 'samples': samples_df, 'performance': performance_df},
         config,
         report_path
     )
     logger.success(f"Saved report: {report_path}")
-    
-    # Print summary
+
     stats = {
-        'Total optimizations': len(results_df) if 'results_df' in locals() else 0,
-        'Total samples': len(samples_df) if 'samples_df' in locals() else 0,
-        'Portfolios evaluated': len(performance_df) if 'performance_df' in locals() else 0
+        'Total optimizations': len(results_df),
+        'Total samples': len(samples_df),
+        'Portfolios evaluated': len(performance_df)
     }
     logger.summary(stats)
-    
     logger.section("Optimization Pipeline Complete!")
-    
-    return {
-        'results': results_df if 'results_df' in locals() else pd.DataFrame(),
-        'samples': samples_df if 'samples_df' in locals() else pd.DataFrame(),
-        'performance': performance_df if 'performance_df' in locals() else pd.DataFrame()
-    }
+    return {'results': results_df, 'samples': samples_df, 'performance': performance_df}
 
 
 if __name__ == '__main__':
