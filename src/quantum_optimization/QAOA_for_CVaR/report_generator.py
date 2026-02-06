@@ -41,7 +41,10 @@ def generate_report(
     if 'results' in results and not results['results'].empty:
         results_df = results['results']
         report_lines.append(f"- Total optimizations: {len(results_df):,}")
-        report_lines.append(f"- Unique dates: {results_df['date'].nunique():,}")
+        if 'date' in results_df.columns:
+            report_lines.append(f"- Unique dates: {results_df['date'].nunique():,}")
+        if 'asset_set' in results_df.columns:
+            report_lines.append(f"- Unique asset sets: {results_df['asset_set'].nunique():,}")
         report_lines.append(f"- Unique configurations: {len(results_df):,}")
         
         if 'best_energy' in results_df.columns:

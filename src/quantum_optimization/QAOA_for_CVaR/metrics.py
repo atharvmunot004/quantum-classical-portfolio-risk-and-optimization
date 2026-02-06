@@ -11,54 +11,53 @@ from scipy import stats
 
 def compute_portfolio_return(
     returns: pd.Series,
-    weights: np.ndarray,
+    weights: Optional[np.ndarray] = None,
     annualized: bool = True
 ) -> float:
-    """Compute portfolio return."""
-    portfolio_returns = (returns.values @ weights)
-    total_return = (1 + portfolio_returns).prod() - 1
-    
-    if annualized:
+    """Compute portfolio return from daily return series (geometric)."""
+    portfolio_returns = np.asarray(returns.values).flatten()
+    if len(portfolio_returns) == 0:
+        return 0.0
+    total_return = float((1 + portfolio_returns).prod() - 1)
+    if annualized and len(portfolio_returns) > 0:
         periods_per_year = 252
         n_periods = len(portfolio_returns)
         total_return = (1 + total_return) ** (periods_per_year / n_periods) - 1
-    
     return total_return
 
 
 def compute_portfolio_volatility(
     returns: pd.Series,
-    weights: np.ndarray,
+    weights: Optional[np.ndarray] = None,
     annualized: bool = True
 ) -> float:
-    """Compute portfolio volatility."""
-    portfolio_returns = returns.values @ weights
-    volatility = portfolio_returns.std()
-    
+    """Compute portfolio volatility from daily return series."""
+    portfolio_returns = np.asarray(returns.values).flatten()
+    if len(portfolio_returns) < 2:
+        return 0.0
+    volatility = float(np.std(portfolio_returns))
     if annualized:
         volatility = volatility * np.sqrt(252)
-    
     return volatility
 
 
 def compute_portfolio_cvar(
     returns: pd.Series,
-    weights: np.ndarray,
+    weights: Optional[np.ndarray] = None,
     confidence_level: float = 0.95,
     annualized: bool = True
 ) -> float:
-    """Compute portfolio CVaR."""
-    portfolio_returns = returns.values @ weights
+    """Compute portfolio CVaR from daily return series (loss = -return)."""
+    portfolio_returns = np.asarray(returns.values).flatten()
     portfolio_losses = -portfolio_returns
-    
+    if len(portfolio_losses) == 0:
+        return 0.0
     var_level = 1 - confidence_level
-    var = np.quantile(portfolio_losses, var_level)
-    
-    cvar = portfolio_losses[portfolio_losses >= var].mean()
-    
+    var = np.quantile(portfolio_losses, min(var_level, 1 - 1e-10))
+    tail = portfolio_losses[portfolio_losses >= var - 1e-10]
+    cvar = float(tail.mean()) if len(tail) > 0 else 0.0
     if annualized:
         cvar = cvar * np.sqrt(252)
-    
     return cvar
 
 
@@ -122,9 +121,9 @@ def evaluate_portfolio_performance(
     )
     
     metrics = {
-        'realized_return': compute_portfolio_return(portfolio_returns, np.ones(len(portfolio_returns))),
-        'realized_volatility': compute_portfolio_volatility(portfolio_returns, np.ones(len(portfolio_returns))),
-        'realized_cvar': compute_portfolio_cvar(portfolio_returns, np.ones(len(portfolio_returns))),
+        'realized_return': compute_portfolio_return(portfolio_returns),
+        'realized_volatility': compute_portfolio_volatility(portfolio_returns),
+        'realized_cvar': compute_portfolio_cvar(portfolio_returns, confidence_level=0.95),
         'max_drawdown': compute_max_drawdown(portfolio_returns),
         'sharpe_ratio': compute_sharpe_ratio(portfolio_returns, risk_free_rate)
     }

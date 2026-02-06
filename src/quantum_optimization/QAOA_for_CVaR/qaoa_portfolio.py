@@ -11,7 +11,7 @@ import time
 import warnings
 
 try:
-    from qiskit import QuantumCircuit
+    from qiskit import QuantumCircuit, transpile
     from qiskit.circuit.library import QAOAAnsatz
     from qiskit.quantum_info import SparsePauliOp
     from qiskit_aer import AerSimulator
@@ -19,6 +19,7 @@ try:
     QISKIT_AVAILABLE = True
 except ImportError:
     QISKIT_AVAILABLE = False
+    transpile = None
     warnings.warn("Qiskit not available. Using classical optimization fallback.")
 
 
@@ -187,24 +188,20 @@ def run_qaoa_optimization(
     # Mixer Hamiltonian: sum of X operators
     mixer_h = SparsePauliOp.from_list([('X' * n, 1.0)])
     
-    # Create QAOA ansatz
+    # Create QAOA ansatz and transpile to Aer-compatible basis gates
     ansatz = QAOAAnsatz(cost_h, reps=reps, mixer_operator=mixer_h)
-    n_params = ansatz.num_parameters
-    
-    # Backend
     backend = AerSimulator()
-    qc_measure = ansatz.copy()
-    qc_measure.measure_all()
-    
+    ansatz = transpile(ansatz, backend=backend)
+    n_params = ansatz.num_parameters
+
     # Energy computation function
     def compute_energies(params: np.ndarray) -> Tuple[np.ndarray, Dict[str, int]]:
         """Compute energies for given parameters."""
-        # Use assign_parameters for newer Qiskit versions, fallback to bind_parameters
         try:
             bound = ansatz.assign_parameters(params)
         except AttributeError:
-            # Fallback for older Qiskit versions
             bound = ansatz.bind_parameters(params)
+        bound.measure_all()
         job = backend.run(bound, shots=shots, seed_simulator=seed)
         result = job.result()
         counts = result.get_counts()

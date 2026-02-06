@@ -115,3 +115,24 @@ class PrecomputeRegistry:
         """Get QAOA result."""
         key = (asset_set, date, weight_config, reps)
         return self._qaoa_results.get(key)
+
+    def store_qaoa_result_single_fit(
+        self,
+        asset_set: Tuple[str, ...],
+        weight_config: Tuple,
+        reps: int,
+        result: object
+    ):
+        """Store QAOA result for single-fit protocol (no date dimension)."""
+        key = ('single_fit', asset_set, weight_config, reps)
+        self._qaoa_results[key] = result
+
+    def get_qaoa_result_single_fit(
+        self,
+        asset_set: Tuple[str, ...],
+        weight_config: Tuple,
+        reps: int
+    ) -> Optional[object]:
+        """Get QAOA result for single-fit protocol."""
+        key = ('single_fit', asset_set, weight_config, reps)
+        return self._qaoa_results.get(key)
